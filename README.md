@@ -139,8 +139,8 @@ your command is re-dispatched.
 ```zsh
 # oh-my-zsh's grc plugin wraps 73 commands, ls among them, so it replaces an
 # eza wrapper and breaks any alias passing eza-only flags.
-_lazy_after_grc() { function ls { eza --color=always --group-directories-first "$@" } }
-lazy_plugins 'grc:df,du,curl,docker,ping,ps,dig'
+_lazy_after_grc() { function ls { eza --color=always --group-directories-first "$@"; }; }
+lazy_plugins 'grc:df,du,curl,ping,ps,dig'   # not docker: the docker plugin owns that trigger
 ```
 
 ## outdated-banner
