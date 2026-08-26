@@ -57,7 +57,12 @@ lazy_plugins() {
         continue
       fi
       _lazy_plugin_of[$trigger]=$plugin
-      functions[$trigger]="_lazy_plugin_dispatch ${(q)trigger} \"\$@\""
+      # The plugin name is baked into the stub body rather than looked up at
+      # dispatch time. Tooling that serialises a shell's functions and replays
+      # them elsewhere -- Claude Code's shell snapshots do exactly this -- carries
+      # the stub across but not the associative arrays, and a stub that has to
+      # consult a registry then fails with "no plugin registered".
+      functions[$trigger]="_lazy_plugin_dispatch ${(q)plugin} ${(q)trigger} \"\$@\""
       claimed+=($trigger)
     done
     (( ${#claimed} )) && _lazy_triggers_of[$plugin]="${claimed[*]}"
@@ -66,19 +71,24 @@ lazy_plugins() {
 }
 
 _lazy_plugin_dispatch() {
-  local trigger=$1; shift
-  local plugin=${_lazy_plugin_of[$trigger]}
-
-  if [[ -z "$plugin" ]]; then
-    print -u2 "lazy_plugins: no plugin registered for '$trigger'"
-    return 127
-  fi
+  local plugin=$1 trigger=$2; shift 2
 
   # Drop every stub for this plugin before sourcing it. If a stub survived, the
   # plugin's own definition would be shadowed and the re-dispatch below would
   # call the stub again forever.
+  #
+  # The sibling list is a convenience, not a requirement: if the registry is
+  # gone (see the note in lazy_plugins), clearing this one stub is still enough
+  # to dispatch correctly, and the others clear themselves when first used.
+  local -a siblings
+  if [[ -n "${_lazy_triggers_of[$plugin]}" ]]; then
+    siblings=(${=_lazy_triggers_of[$plugin]})
+  else
+    siblings=($trigger)
+  fi
+
   local t
-  for t in ${=_lazy_triggers_of[$plugin]}; do
+  for t in $siblings; do
     unfunction $t 2>/dev/null
     unset "_lazy_plugin_of[$t]"
   done

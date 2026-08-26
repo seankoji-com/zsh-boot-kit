@@ -183,6 +183,46 @@ EOF
     End
   End
 
+  Describe 'surviving a lost registry'
+    # Tooling that serialises a shell's functions and replays them elsewhere
+    # carries the stubs across but not the associative arrays. Claude Code's
+    # shell snapshots do exactly this, and a stub that has to consult a registry
+    # then fails with "no plugin registered" on a command that used to work.
+    It 'dispatches after the registry has been wiped'
+      run_it() {
+        make_fn_plugin demo
+        lazy_plugins demo
+        unset _lazy_plugin_of _lazy_triggers_of
+        typeset -gA _lazy_plugin_of _lazy_triggers_of
+        demo hello
+      }
+      When call run_it
+      The output should equal 'demo ran: hello'
+      The status should be success
+    End
+
+    It 'still dispatches through a sibling stub the cleanup could not reach'
+      run_it() {
+        mkdir -p "$ZSH_CUSTOM/plugins/demo"
+        cat > "$ZSH_CUSTOM/plugins/demo/demo.plugin.zsh" <<'EOF'
+demo() { print "demo ran: $*" }
+alt()  { print "alt ran: $*" }
+EOF
+        lazy_plugins 'demo:demo,alt'
+        unset _lazy_triggers_of
+        typeset -gA _lazy_triggers_of
+        demo once >/dev/null
+        # Without the sibling list, 'alt' survives the first dispatch. That is
+        # harmless: it carries its own plugin name, so it re-sources and
+        # dispatches correctly rather than erroring.
+        alt twice
+      }
+      When call run_it
+      The output should equal 'alt ran: twice'
+      The status should be success
+    End
+  End
+
   Describe 'the post-load hook'
     # oh-my-zsh's grc plugin wraps 73 commands including ls, so it silently
     # replaces an eza wrapper and breaks aliases passing eza-only flags.
