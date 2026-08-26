@@ -42,12 +42,27 @@ lazy_plugins() {
       continue
     fi
 
-    _lazy_triggers_of[$plugin]="${triggers[*]}"
+    # Record only the triggers actually claimed. A trigger skipped below still
+    # belongs to the plugin that claimed it first, and listing it here would
+    # make this plugin's dispatch cleanup unfunction and steal it.
+    local -a claimed
+    claimed=()
     for trigger in $triggers; do
+      # Two plugins claiming the same trigger is a silent footgun: the second
+      # registration overwrites the first, so one plugin simply never loads and
+      # nothing says so. Easy to hit, since a command like `docker` is both an
+      # oh-my-zsh plugin in its own right and one of the 73 commands grc wraps.
+      if [[ -n "${_lazy_plugin_of[$trigger]}" && "${_lazy_plugin_of[$trigger]}" != "$plugin" ]]; then
+        print -u2 "lazy_plugins: '$trigger' is already a trigger for '${_lazy_plugin_of[$trigger]}' — not reassigning it to '$plugin'"
+        continue
+      fi
       _lazy_plugin_of[$trigger]=$plugin
       functions[$trigger]="_lazy_plugin_dispatch ${(q)trigger} \"\$@\""
+      claimed+=($trigger)
     done
+    (( ${#claimed} )) && _lazy_triggers_of[$plugin]="${claimed[*]}"
   done
+  return 0
 }
 
 _lazy_plugin_dispatch() {
@@ -80,6 +95,14 @@ _lazy_plugin_dispatch() {
       break
     fi
   done
+
+  # Post-load hook. Some plugins redefine things you set up earlier: the
+  # oh-my-zsh `grc` plugin wraps 73 commands, `ls` among them, so it silently
+  # replaces an eza or exa wrapper and breaks any alias passing flags the real
+  # ls does not accept. Define _lazy_after_<plugin> to put things back.
+  if (( $+functions[_lazy_after_$plugin] )); then
+    "_lazy_after_$plugin"
+  fi
 
   # Re-run what the user typed. The old version of this always used
   # `command $trigger`, which breaks for every plugin that provides a shell
