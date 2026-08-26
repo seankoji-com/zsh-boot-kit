@@ -20,6 +20,14 @@ Describe 'lazy-plugins.zsh'
     print "$1() { print \"$1 ran: \$*\" }" > "$ZSH_CUSTOM/plugins/$1/$1.plugin.zsh"
   }
 
+  # A plugin that defines a function under a name other than its own, so a
+  # trigger pointing at it actually resolves on re-dispatch.
+  make_plugin_defining() {
+    # $1 plugin name, $2 function it defines
+    mkdir -p "$ZSH_CUSTOM/plugins/$1"
+    print "$2() { print \"$1 ran: \$*\" }" > "$ZSH_CUSTOM/plugins/$1/$1.plugin.zsh"
+  }
+
   # A plugin whose value is aliases, like the gemini CLI plugin.
   make_alias_plugin() {
     mkdir -p "$ZSH_CUSTOM/plugins/$1"
@@ -115,6 +123,63 @@ EOF
       }
       When call run_it
       The output should equal 'sourced 1 time(s)'
+    End
+  End
+
+  Describe 'trigger collisions'
+    # A command like `docker` is both an oh-my-zsh plugin in its own right and
+    # one of the 73 commands grc wraps, so claiming it twice is easy to do by
+    # accident. Silently letting the second registration win means one plugin
+    # never loads and nothing says why.
+    It 'refuses to reassign a trigger another plugin already claimed'
+      run_it() {
+        make_plugin_defining first shared
+        make_plugin_defining second shared
+        lazy_plugins 'first:shared'
+        lazy_plugins 'second:shared'
+      }
+      When call run_it
+      The stderr should include "already a trigger for 'first'"
+    End
+
+    It 'leaves the original owner dispatching'
+      run_it() {
+        make_plugin_defining first shared
+        make_plugin_defining second shared
+        lazy_plugins 'first:shared'
+        lazy_plugins 'second:shared' 2>/dev/null
+        shared x
+      }
+      When call run_it
+      The output should equal 'first ran: x'
+    End
+
+    # The skipped trigger still belongs to the first plugin. If it were
+    # recorded against the second, that plugin's dispatch cleanup would
+    # unfunction it and steal it.
+    It 'does not let the loser steal the trigger on its own dispatch'
+      run_it() {
+        make_plugin_defining first shared
+        make_fn_plugin second
+        lazy_plugins 'first:shared'
+        lazy_plugins 'second:second,shared' 2>/dev/null
+        second y >/dev/null
+        shared x
+      }
+      When call run_it
+      The output should equal 'first ran: x'
+    End
+
+    It 'allows the same plugin to re-register its own trigger'
+      run_it() {
+        make_fn_plugin demo
+        lazy_plugins 'demo:demo'
+        lazy_plugins 'demo:demo'
+        demo x
+      }
+      When call run_it
+      The output should equal 'demo ran: x'
+      The stderr should equal ''
     End
   End
 

@@ -124,6 +124,13 @@ breaks every plugin providing a shell function instead of a binary. oh-my-zsh's
 Listing a plugin that is also in `$plugins` is refused with a warning. It would
 load eagerly at startup *and* be re-sourced by the stub on every call.
 
+### Trigger collisions
+
+Two plugins claiming the same trigger is refused with a warning rather than
+silently letting the second win, which would leave one plugin never loading and
+nothing saying why. Easy to hit: `docker` is both an oh-my-zsh plugin in its own
+right and one of the 73 commands grc wraps.
+
 ### Undoing what a plugin clobbers
 
 Define `_lazy_after_<plugin>` and it runs after the plugin is sourced, before
