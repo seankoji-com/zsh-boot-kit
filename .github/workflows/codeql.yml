@@ -1,0 +1,53 @@
+name: CodeQL analysis
+
+# The org's Universal ruleset requires code scanning results on main, and a
+# repository with no analyses can never satisfy it: every pull request sits at
+# mergeable_state "blocked" with nothing to point at.
+#
+# CodeQL has no shell analyser, so the zsh in this repo cannot be scanned. It
+# does analyse GitHub Actions workflows, which is a real target rather than a
+# box-tick: workflow injection through untrusted inputs is the failure mode
+# that actually applies to a repo like this one.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  merge_group:
+  schedule:
+    - cron: '23 7 * * 1' # Mondays 07:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze
+    # Skip forks: they cannot write security events, so the job would only ever
+    # fail noisily on an outside contributor's pull request.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [actions]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          upload: true
+          category: "/language:${{ matrix.language }}"
