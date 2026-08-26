@@ -81,6 +81,14 @@ _lazy_plugin_dispatch() {
     fi
   done
 
+  # Post-load hook. Some plugins redefine things you set up earlier: the
+  # oh-my-zsh `grc` plugin wraps 73 commands, `ls` among them, so it silently
+  # replaces an eza or exa wrapper and breaks any alias passing flags the real
+  # ls does not accept. Define _lazy_after_<plugin> to put things back.
+  if (( $+functions[_lazy_after_$plugin] )); then
+    "_lazy_after_$plugin"
+  fi
+
   # Re-run what the user typed. The old version of this always used
   # `command $trigger`, which breaks for every plugin that provides a shell
   # function rather than a binary: `extract` exits 127 because there is no

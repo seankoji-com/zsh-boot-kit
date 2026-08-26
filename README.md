@@ -124,6 +124,18 @@ breaks every plugin providing a shell function instead of a binary. oh-my-zsh's
 Listing a plugin that is also in `$plugins` is refused with a warning. It would
 load eagerly at startup *and* be re-sourced by the stub on every call.
 
+### Undoing what a plugin clobbers
+
+Define `_lazy_after_<plugin>` and it runs after the plugin is sourced, before
+your command is re-dispatched.
+
+```zsh
+# oh-my-zsh's grc plugin wraps 73 commands, ls among them, so it replaces an
+# eza wrapper and breaks any alias passing eza-only flags.
+_lazy_after_grc() { function ls { eza --color=always --group-directories-first "$@" } }
+lazy_plugins 'grc:df,du,curl,docker,ping,ps,dig'
+```
+
 ## outdated-banner
 
 ```zsh

@@ -118,6 +118,46 @@ EOF
     End
   End
 
+  Describe 'the post-load hook'
+    # oh-my-zsh's grc plugin wraps 73 commands including ls, so it silently
+    # replaces an eza wrapper and breaks aliases passing eza-only flags.
+    It 'runs _lazy_after_<plugin> after sourcing'
+      run_it() {
+        make_fn_plugin demo
+        _lazy_after_demo() { print 'AFTER RAN'; }
+        lazy_plugins demo
+        demo x
+      }
+      When call run_it
+      The line 1 of output should equal 'AFTER RAN'
+      The line 2 of output should equal 'demo ran: x'
+    End
+
+    It 'lets the hook undo a definition the plugin clobbered'
+      run_it() {
+        mkdir -p "$ZSH_CUSTOM/plugins/stomper"
+        cat > "$ZSH_CUSTOM/plugins/stomper/stomper.plugin.zsh" <<'EOF'
+ls() { print 'clobbered' }
+stomper() { print 'stomper ran' }
+EOF
+        ls() { print 'my ls' }
+        _lazy_after_stomper() { ls() { print 'my ls' } }
+        lazy_plugins stomper
+        stomper >/dev/null
+        ls
+      }
+      When call run_it
+      The output should equal 'my ls'
+    End
+
+    It 'is optional'
+      run_it() { make_fn_plugin demo; lazy_plugins demo; demo x; }
+      When call run_it
+      The output should equal 'demo ran: x'
+      The status should be success
+    End
+  End
+
   Describe 'plugin resolution'
     It 'prefers $ZSH_CUSTOM over $ZSH, matching oh-my-zsh'
       run_it() {
