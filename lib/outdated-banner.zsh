@@ -75,13 +75,17 @@ outdated_banner() {
 
   [[ -n "$upgrade" ]] || return 0
 
-  # read -k rather than read -q: -q insists on a controlling terminal and dies
-  # with "not interactive and can't open terminal" when stdin is a pipe, which
-  # makes this branch impossible to test. -k reads the same single keypress
-  # from stdin and behaves identically at a real prompt.
+  # When attached to a terminal, `read -k 1` puts the tty into cbreak mode so
+  # single keypresses (y/n) work without pressing Enter. When stdin is a pipe
+  # (such as under shellspec), read from fd 0 (-u 0) to avoid failing on the
+  # absence of a controlling terminal.
   local began=$EPOCHREALTIME reply=''
   print -n "  Upgrade now? [y/N] "
-  read -k 1 -u 0 reply
+  if [[ -t 0 ]]; then
+    read -k 1 reply
+  else
+    read -k 1 -u 0 reply
+  fi
   print
   if [[ $reply == [yY] ]]; then
     eval "$upgrade"
