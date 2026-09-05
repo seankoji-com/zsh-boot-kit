@@ -267,8 +267,10 @@ End
 
 It 'waits on the registered job before printing banners'
 Data 'n'
+Mock 'wait'
+print "WAITING $1"
+End
 run_it() {
-  wait() { print "WAITING $1"; }
   print -l a >"$CACHE"
   _out_register_bg_job 99
   outdated_banner --cache "$CACHE" --message '%s thing' --defer --upgrade 'true'
@@ -282,8 +284,10 @@ End
 
 It 'does not wait when nothing was collected, even with a job registered'
 reset_accumulator
+Mock 'wait'
+print "WAITING $1"
+End
 run_it() {
-  wait() { print "WAITING $1"; }
   _out_register_bg_job 99
   outdated_banner_prompt
 }
