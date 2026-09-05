@@ -206,7 +206,7 @@ are banners, so a clean shell pays nothing:
 
 ```zsh
 fastfetch &
-_out_register_bg_job $!   # after the &, *.zshrc* keeps running
+_out_register_bg_job $!   # after the &, .zshrc keeps running
 # ...
 outdated_banner_prompt     # waits for fastfetch to draw, then shows the banners
 ```
