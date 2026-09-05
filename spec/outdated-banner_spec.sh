@@ -280,6 +280,8 @@ When call run_it
 # The wait must happen BEFORE the banner appears, so the wait line is first.
 The line 1 of output should equal 'WAITING 99'
 The output should include '1 thing'
+# The PID is cleared after the wait so a later recycled PID can't block again.
+The variable _out_bg_job should equal 0
 End
 
 It 'does not wait when nothing was collected, even with a job registered'
