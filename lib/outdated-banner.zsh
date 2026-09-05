@@ -71,8 +71,16 @@ typeset -gi _out_bg_job=0
 
 # Register a backgrounded welcome process for outdated_banner_prompt to wait on
 # before it prints (waited for only when there are banners). See the header.
+# Accepts only an unsigned integer PID; anything else (including no argument)
+# clears the registration. Always returns success so callers under `set -e`
+# are never aborted.
 _out_register_bg_job() {
-  (( $# )) && _out_bg_job=$1
+  if (( $# )) && [[ $1 == <-> ]]; then
+    _out_bg_job=$1
+  else
+    _out_bg_job=0
+  fi
+  return 0
 }
 
 outdated_banner() {
@@ -161,6 +169,9 @@ outdated_banner_prompt() {
   # no-op so a reaped greeting can't abort the shell under `set -e`.
   if (( _out_bg_job > 0 )); then
     wait "$_out_bg_job" 2>/dev/null || true
+    # Clear it so a later PID reuse in this same shell can't make a future
+    # prompt wait on an unrelated child.
+    _out_bg_job=0
   fi
 
   local i

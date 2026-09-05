@@ -249,6 +249,13 @@ When call _out_register_bg_job 12345
 The variable _out_bg_job should equal 12345
 End
 
+It 'clears the registration on a non-numeric argument'
+run_it() { _out_register_bg_job 'not-a-pid'; }
+When call run_it
+The status should be success
+The variable _out_bg_job should equal 0
+End
+
 It 'waits on the registered job before printing banners'
 Data 'n'
 run_it() {
@@ -259,7 +266,9 @@ run_it() {
   outdated_banner_prompt
 }
 When call run_it
-The output should include 'WAITING 99'
+# The wait must happen BEFORE the banner appears, so the wait line is first.
+The line 1 of output should equal 'WAITING 99'
+The output should include '1 thing'
 End
 
 It 'does not wait when nothing was collected, even with a job registered'
