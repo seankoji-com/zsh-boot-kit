@@ -199,6 +199,20 @@ The banners accumulate silently; `outdated_banner_prompt` prints them all and
 asks `y/N` once, then runs every collected `--upgrade` command (in order) on
 `y` or none of them on `n`.
 
+If your shell draws a backgrounded welcome splash (e.g. `fastfetch &`) that
+races the prompt — its ASCII art landing on top of the y/N — register it so the
+prompt waits for it to finish drawing first. The wait happens *only* when there
+are banners, so a clean shell pays nothing:
+
+```zsh
+fastfetch &
+_out_register_bg_job $!   # after the &, .zshrc keeps running
+# ...
+outdated_banner_prompt     # waits for fastfetch to draw, then shows the banners
+```
+
+Use a plain `&` (not `&!`/disowned) so the job stays waitable.
+
 ## Licence
 
 MIT
