@@ -188,6 +188,7 @@ Before 'reset_accumulator'
 reset_accumulator() {
   _out_banners_line=()
   _out_banners_upgrade=()
+  _out_bg_job=0
 }
 
 It 'collects banners silently, then prints them and prompts once on flush'
@@ -236,6 +237,41 @@ run_it() {
 }
 When call run_it
 The output should include '1 shown'
+End
+
+Describe '_out_register_bg_job and the background-greeting wait'
+# fastfetch runs backgrounded during omz load, so its ASCII art can land on top
+# of the deferred y/N. The prompt therefore waits for a registered welcome
+# process to finish drawing first — but only when there are banners to flush.
+
+It 'records the registered job PID'
+When call _out_register_bg_job 12345
+The variable _out_bg_job should equal 12345
+End
+
+It 'waits on the registered job before printing banners'
+Data 'n'
+run_it() {
+  wait() { print "WAITING $1"; }
+  print -l a >"$CACHE"
+  _out_register_bg_job 99
+  outdated_banner --cache "$CACHE" --message '%s thing' --defer --upgrade 'true'
+  outdated_banner_prompt
+}
+When call run_it
+The output should include 'WAITING 99'
+End
+
+It 'does not wait when nothing was collected, even with a job registered'
+reset_accumulator
+run_it() {
+  wait() { print "WAITING $1"; }
+  _out_register_bg_job 99
+  outdated_banner_prompt
+}
+When call run_it
+The output should equal ''
+End
 End
 End
 End

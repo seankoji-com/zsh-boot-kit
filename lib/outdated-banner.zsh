@@ -19,7 +19,19 @@
 #
 #   outdated_banner_prompt
 #     Print every banner collected with --defer, then ask a single y/N whether
-#     to run each collected upgrade command (in the order collected).
+#     to run each collected upgrade command (in the order collected). Before
+#     printing it waits (only when banners exist) for any backgrounded welcome
+#     process registered via _out_register_bg_job — typically fastfetch — so
+#     that process's output finishes drawing before the banners and prompt, and
+#     never lands on top of the y/N.
+#
+#   _out_register_bg_job PID
+#     Register a backgrounded, not-disowned process (e.g. fastfetch) whose output
+#     should finish drawing before the deferred prompt shows. The PID is only
+#     waited on when there are banners to flush: a fresh shell with nothing to
+#     update keeps zero added latency. Call it right after launching the job:
+#         fastfetch &
+#         _out_register_bg_job $!
 #
 # FMT is a printf format taking the count, e.g. '%s package(s) outdated'.
 #
@@ -52,6 +64,16 @@ _outdated_banner_interactive() {
 # leftover outdated_banner_prompt flush these hold the rendered lines and their
 # upgrade commands. Both are per-shell, so a fresh zsh never inherits them.
 typeset -ga _out_banners_line _out_banners_upgrade
+
+# Backgrounded, not-disowned welcome process (fastfetch) whose output should
+# finish drawing before the deferred prompt shows. 0 means none registered.
+typeset -gi _out_bg_job=0
+
+# Register a backgrounded welcome process for outdated_banner_prompt to wait on
+# before it prints (waited for only when there are banners). See the header.
+_out_register_bg_job() {
+  (( $# )) && _out_bg_job=$1
+}
 
 outdated_banner() {
   local cache='' message='' icon='' upgrade='' hint='' count_mode=lines defer=0
@@ -128,6 +150,18 @@ outdated_banner() {
 outdated_banner_prompt() {
   _outdated_banner_interactive || return 0
   (( ${#_out_banners_line} )) || return 0
+
+  # Let a backgrounded welcome process (fastfetch) finish drawing first so its
+  # output doesn't interleave with the banners or land on top of the y/N. Only
+  # reached when there ARE banners, so a clean shell pays nothing.
+  #
+  # zsh's `wait` acts only on the shell's own child jobs: a PID for a process
+  # already reaped, or one reused by an unrelated process, is not a child and
+  # returns immediately (127) rather than blocking. `|| true` makes that a
+  # no-op so a reaped greeting can't abort the shell under `set -e`.
+  if (( _out_bg_job > 0 )); then
+    wait "$_out_bg_job" 2>/dev/null || true
+  fi
 
   local i
   for i in {1..${#_out_banners_line}}; do
