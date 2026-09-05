@@ -166,6 +166,7 @@ depend on how slow `brew update` is.
 | `--count MODE` | `lines`, `content` (pre-computed number), or `none` |
 | `--upgrade CMD` | Offer a y/N prompt and run this on yes |
 | `--hint TEXT` | Trailing parenthetical (default `see <cache>`) |
+| `--defer` | Collect the banner instead of prompting immediately |
 
 Only fires in an interactive shell on a real TTY, so sourcing `.zshrc` from a
 script to pick up env vars never blocks. An empty cache file, or one containing
@@ -173,6 +174,30 @@ a literal `0`, is treated as "checked, nothing to do".
 
 The prompt wait and the upgrade run are handed to `boot_kit_exclude`, so the
 startup log stays honest on the days you actually upgrade.
+
+### Deferring several upgrades to one prompt
+
+Each `--upgrade` banner prompts on its own — a `[y/N]` per system on boot. To
+collect several and ask once, pass `--defer` to every banner and call
+`outdated_banner_prompt` after fnm/pyenv &c. are on `PATH` (so the deferred
+upgrade commands can run there):
+
+```zsh
+outdated_banner --cache ~/.cache/brew-outdated   \
+  --icon $'\U1F37A'  --message '%s Homebrew package(s) outdated' \
+  --upgrade 'brew upgrade --yes' --defer
+outdated_banner --cache ~/.cache/plugins-outdated \
+  --icon $'\U1F9E9'  --message '%s zsh plugin(s) behind upstream' \
+  --upgrade 'plugins-outdated-cache.sh --upgrade' --defer
+
+# ... rest of .zshrc (fnm init, ...) ...
+
+outdated_banner_prompt   # one "Update all of the above? [y/N]"
+```
+
+The banners accumulate silently; `outdated_banner_prompt` prints them all and
+asks `y/N` once, then runs every collected `--upgrade` command (in order) on
+`y` or none of them on `n`.
 
 ## Licence
 
