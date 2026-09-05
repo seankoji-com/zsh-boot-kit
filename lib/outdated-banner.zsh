@@ -75,6 +75,10 @@ typeset -gi _out_bg_job=0
 # clears the registration. Always returns success so callers under `set -e`
 # are never aborted.
 _out_register_bg_job() {
+  # `<->` is a numeric glob that only exists under extendedglob; scope it
+  # locally so validation never depends on the caller's option state, and it
+  # restores the caller's setting on return.
+  setopt local_options extendedglob
   if (( $# )) && [[ $1 == <-> ]]; then
     _out_bg_job=$1
   else

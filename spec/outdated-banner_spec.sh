@@ -256,6 +256,15 @@ The status should be success
 The variable _out_bg_job should equal 0
 End
 
+It 'parses a PID even when the caller has extendedglob disabled'
+run_it() {
+  setopt noextendedglob
+  _out_register_bg_job 4321
+}
+When call run_it
+The variable _out_bg_job should equal 4321
+End
+
 It 'waits on the registered job before printing banners'
 Data 'n'
 run_it() {
