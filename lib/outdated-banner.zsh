@@ -22,13 +22,14 @@
 #   outdated_banner_prompt
 #     Print every banner collected with --defer, then offer to run the
 #     collected upgrade commands. With gum(1) on PATH and a terminal, the
-#     banners render in a styled box and a multi-select menu lets you choose
-#     which systems to update (all preselected); each runs under its own
-#     spinner and a one-line result. Without gum the original single y/N
-#     prompt is used. Before either, it waits (when a background welcome
-#     process was registered via _out_bg_job_start — typically fastfetch) so
-#     that process's output finishes drawing before the banners, and reaps it
-#     so zsh never prints a stray "[n] done" job line at the prompt.
+#     banners render in a styled box and a single confirm asks whether to run
+#     every collected upgrade (default is No, so a bare Enter skips); each then
+#     runs under its own spinner with a one-line result. Without gum the
+#     original y/N prompt is used. Before either, it waits (when a background
+#     welcome process was registered via _out_bg_job_start — typically
+#     fastfetch) so that process's output finishes drawing before the banners,
+#     and reaps it so zsh never prints a stray "[n] done" job line at the
+#     prompt.
 #
 #   _out_bg_job_start CMD [ARGS...]
 #     Launch a background, not-disowned welcome process (e.g. fastfetch) with
@@ -297,44 +298,28 @@ _out_run_upgrade_gum() {
   return 0
 }
 
-# The gum path: a multi-select menu (everything preselected) then a sequential
-# spinner per chosen system. Cancelling the menu (Ctrl-C / Esc) skips
-# everything.
+# The gum path: one binary confirm (default is No, so a bare Enter skips), then
+# a sequential spinner per collected upgrade command.
 _out_prompt_gum() {
-  local -a opts=()
-  local i label
+  local -a idxs=()
+  local i
   for i in {1..${#_out_banners_upgrade}}; do
-    [[ -n "${_out_banners_upgrade[$i]}" ]] || continue
-    label=${_out_banners_label[$i]:-${_out_banners_line[$i]}}
-    opts+=("${label}|${i}")
+    [[ -n "${_out_banners_upgrade[$i]}" ]] && idxs+=("$i")
   done
 
   # No banner carries an upgrade command: nothing to offer, banners already shown.
-  (( ${#opts} )) || return 0
+  (( ${#idxs} )) || return 0
 
-  local out='' rc=0
-  out=$(gum choose --no-limit --ordered \
-    --header 'Select what to update:' \
-    --cursor-prefix '• ' --selected-prefix '✓ ' --unselected-prefix '○ ' \
-    --label-delimiter '|' --selected='*' "${opts[@]}") || rc=$?
-
-  if (( rc != 0 )); then
-    gum style --foreground 245 '  Skipped.'
-    return 0
-  fi
-
-  local -a chosen=(${(f)out})
-  (( ${#chosen} )) || {
-    gum style --foreground 245 '  Nothing selected.'
-    return 0
-  }
+  # --default=false makes "Skip" the selection a bare Enter commits to; a
+  # negative answer (or Ctrl-C) runs nothing.
+  gum confirm 'Update all of the above?' \
+    --affirmative 'Update' --negative 'Skip' --default=false || return 0
 
   local logdir="${TMPDIR:-/tmp}/zsh-boot-kit-updates-$$"
   mkdir -p "$logdir" 2>/dev/null
 
   local idx name log
-  for idx in "${chosen[@]}"; do
-    [[ "$idx" == <-> ]] || continue
+  for idx in "${idxs[@]}"; do
     name=${_out_banners_label[$idx]:-${_out_banners_line[$idx]}}
     log="$logdir/${idx}.log"
     _out_run_upgrade_gum "$idx" "$name" "$log"

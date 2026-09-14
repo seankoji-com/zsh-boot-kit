@@ -361,31 +361,21 @@ reset_accumulator() {
 }
 
 # A fake gum(1) so the gum path is exercised without a terminal. It parses
-# only the flags this module actually passes; `choose` emits the values named
-# by FAKE_GUM_CHOOSE_OUT (all of them when unset), `spin` runs the command that
-# follows `--`, and `style` prints its trailing text argument or copies stdin.
+# only the flags this module actually passes; `confirm` exits with
+# FAKE_GUM_CONFIRM (0 by default), `spin` runs the command that follows `--`,
+# and `style` prints its trailing text argument or copies stdin.
 gum_env() {
   FAKEBIN="$TMPROOT/bin"
   FAKE_GUM_LOG="$TMPROOT/gum.log"
-  unset FAKE_GUM_CHOOSE_OUT FAKE_GUM_CHOOSE_RC
+  unset FAKE_GUM_CONFIRM
   mkdir -p "$FAKEBIN"
   cat >"$FAKEBIN/gum" <<'STUB'
 #!/bin/sh
 printf '%s %s\n' "$1" "$*" >> "$FAKE_GUM_LOG"
 cmd=$1; shift
 case "$cmd" in
-  choose)
-    if [ -n "${FAKE_GUM_CHOOSE_RC+x}" ]; then
-      [ -n "${FAKE_GUM_CHOOSE_OUT:-}" ] && printf '%s\n' ${FAKE_GUM_CHOOSE_OUT}
-      exit "$FAKE_GUM_CHOOSE_RC"
-    fi
-    if [ -n "${FAKE_GUM_CHOOSE_OUT+x}" ]; then
-      [ -n "$FAKE_GUM_CHOOSE_OUT" ] && printf '%s\n' $FAKE_GUM_CHOOSE_OUT
-      exit 0
-    fi
-    for a in "$@"; do
-      case "$a" in *'|'*) printf '%s\n' "${a##*|}" ;; esac
-    done
+  confirm)
+    exit "${FAKE_GUM_CONFIRM:-0}"
     ;;
   spin)
     while [ $# -gt 0 ] && [ "$1" != "--" ]; do shift; done
@@ -411,7 +401,7 @@ STUB
   export ZSH_BOOT_KIT_UI=gum
 }
 
-It 'shows a styled summary and runs every selected upgrade'
+It 'shows a styled summary and runs every upgrade when confirmed'
 run_it() {
   MARK1="$TMPROOT/run1"
   MARK2="$TMPROOT/run2"
@@ -430,11 +420,11 @@ The output should include '✔ Homebrew'
 The output should include '✔ npm globals'
 End
 
-It 'runs only the chosen systems'
+It 'runs nothing when the confirm is declined (a bare Enter, the default)'
 run_it() {
   MARK1="$TMPROOT/run1"
   MARK2="$TMPROOT/run2"
-  export FAKE_GUM_CHOOSE_OUT=2
+  export FAKE_GUM_CONFIRM=1
   print -l a >"$CACHE"
   outdated_banner --cache "$CACHE" --message '%s brew thing' --label 'Homebrew' --defer --upgrade "touch $MARK1"
   print -l a >"$CACHE2"
@@ -443,35 +433,23 @@ run_it() {
 }
 CACHE2="$TMPROOT/outdated2"
 When call run_it
-The path "$MARK2" should be exist
 The path "$MARK1" should not be exist
-The output should not include '✔ Homebrew'
+The path "$MARK2" should not be exist
+The output should include 'Updates available'
+The output should not include '✔'
 End
 
-It 'skips everything when the menu is cancelled'
+It 'asks one binary confirm, defaulting to No'
 run_it() {
-  MARK1="$TMPROOT/run1"
-  export FAKE_GUM_CHOOSE_RC=1
   print -l a >"$CACHE"
-  outdated_banner --cache "$CACHE" --message '%s brew thing' --label 'Homebrew' --defer --upgrade "touch $MARK1"
+  outdated_banner --cache "$CACHE" --message '%s brew thing' --label 'Homebrew' --defer --upgrade 'true'
   outdated_banner_prompt
 }
 When call run_it
-The path "$MARK1" should not be exist
-The output should include 'Skipped.'
-End
-
-It 'runs nothing when the selection is empty'
-run_it() {
-  MARK1="$TMPROOT/run1"
-  export FAKE_GUM_CHOOSE_OUT=''
-  print -l a >"$CACHE"
-  outdated_banner --cache "$CACHE" --message '%s brew thing' --label 'Homebrew' --defer --upgrade "touch $MARK1"
-  outdated_banner_prompt
-}
-When call run_it
-The path "$MARK1" should not be exist
-The output should include 'Nothing selected.'
+The output should include '✔ Homebrew'
+The contents of file "$FAKE_GUM_LOG" should include 'confirm'
+The contents of file "$FAKE_GUM_LOG" should include '--default=false'
+The contents of file "$FAKE_GUM_LOG" should not include 'choose'
 End
 
 It 'reports a failed upgrade with its exit code'

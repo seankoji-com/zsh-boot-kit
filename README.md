@@ -180,11 +180,10 @@ startup log stays honest on the days you actually upgrade.
 
 With [gum](https://charm.sh) on `PATH` — it is in the dotfiles
 `Brewfile.common` — the deferred prompt renders the banners in a rounded box,
-then shows a multi-select menu of every system with an upgrade command
-(everything selected, so `Enter` updates all). Each chosen system runs under
-its own spinner with its output captured to a log; a one-line `✔`/`✘` reports
-the result, and a failure prints the log path instead of dumping output at the
-spinner.
+then asks one confirm. The default is No, so a bare `Enter` skips everything;
+choosing Update runs every collected upgrade under its own spinner with output
+captured to a log, and a one-line `✔`/`✘` reports each result (a failure prints
+the log path instead of dumping output at the spinner).
 
 Without gum the original single `y/N` prompt is used, so hosts that do not
 install it (some Pi/NAS setups) keep working unchanged. `ZSH_BOOT_KIT_UI`
@@ -209,7 +208,7 @@ outdated_banner --cache ~/.cache/plugins-outdated \
 
 # ... rest of .zshrc (fnm init, ...) ...
 
-outdated_banner_prompt   # gum multi-select, or a single y/N without gum
+outdated_banner_prompt   # gum confirm (default No), or y/N without gum
 ```
 
 The banners accumulate silently; `outdated_banner_prompt` shows them all and
