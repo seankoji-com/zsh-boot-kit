@@ -164,7 +164,9 @@ depend on how slow `brew update` is.
 | `--message FMT` | printf format taking the count |
 | `--icon TEXT` | Prefix, usually an emoji |
 | `--count MODE` | `lines`, `content` (pre-computed number), or `none` |
-| `--upgrade CMD` | Offer a y/N prompt and run this on yes |
+| `--upgrade CMD` | Offer to run this command when the banner fires |
+| `--label TEXT` | Short name for `CMD` in the progress view (e.g. `Homebrew packages`); defaults to the banner text |
+| `--progress` | `CMD` speaks the `@total`/`@done`/`@skip`/`@fail` protocol under `ZSH_BOOT_KIT_PROGRESS=1`, so the UI lists each item live instead of spinning |
 | `--hint TEXT` | Trailing parenthetical (default `see <cache>`) |
 | `--defer` | Collect the banner instead of prompting immediately |
 
@@ -174,6 +176,63 @@ a literal `0`, is treated as "checked, nothing to do".
 
 The prompt wait and the upgrade run are handed to `boot_kit_exclude`, so the
 startup log stays honest on the days you actually upgrade.
+
+### The prompt
+
+With [gum](https://charm.sh) on `PATH` — it is in the dotfiles
+`Brewfile.common` — the deferred prompt renders the banners in a rounded box,
+then asks one confirm. The default is No, so a bare `Enter` skips everything;
+choosing Update runs every collected upgrade and reports each result. An upgrade
+marked `--progress` prints one line per item as it lands, from the structured
+protocol its command emits under `ZSH_BOOT_KIT_PROGRESS=1`:
+
+```
+  ✔ htop
+  ✔ git
+  ○ node (skipped)
+  ✔ Homebrew packages (2/3 updated, 1 skipped)
+```
+
+Anything else runs under a spinner with a one-line result. Item output is
+captured to a per-system log; a failure prints the log path instead of dumping
+output over the progress view.
+
+Without gum the original single `y/N` prompt is used, so hosts that do not
+install it (some Pi/NAS setups) keep working unchanged.
+
+`ZSH_BOOT_KIT_UI` picks the backend:
+
+| Value | Behaviour |
+|---|---|
+| `auto` (default) | gum when it is installed **and stdout is a terminal**, otherwise `y/N` |
+| `gum` | gum when it is installed, otherwise `y/N` (it is a preference, not a hard force) |
+| `plain` | always `y/N` |
+
+### Progress protocol
+
+An `--progress` upgrade must print these lines on stdout when
+`ZSH_BOOT_KIT_PROGRESS=1` is set — and only then, so the plain `y/N` path keeps
+its original human-readable output:
+
+| Line | Meaning |
+|---|---|
+| `@total N` | How many items the run will process |
+| `@done NAME` | One item succeeded |
+| `@skip NAME` | One item was left alone (e.g. local changes) |
+| `@fail NAME` | One item failed |
+
+Anything else on stdout, and all stderr, goes to the log. The dotfiles
+`brew-outdated-cache.sh`, `plugins-outdated-cache.sh`, and
+`npm-outdated-cache.sh` all implement it for their `--upgrade` modes.
+
+### What `--upgrade` runs against
+
+Both backends run the command through zsh (`eval` in the plain path; `zsh -c`
+under gum), so zsh syntax works either way. Under gum it is a *child* process,
+though: shell functions, aliases, and unexported variables defined earlier in
+`.zshrc` are not visible to it. Write an `--upgrade` command as a self-contained
+invocation (the dotfiles ones are script calls) and it behaves the same on a
+host without gum.
 
 ### Deferring several upgrades to one prompt
 
@@ -185,33 +244,42 @@ upgrade commands can run there):
 ```zsh
 outdated_banner --cache ~/.cache/brew-outdated   \
   --icon $'\U1F37A'  --message '%s Homebrew package(s) outdated' \
+  --label 'Homebrew packages' \
   --upgrade 'brew upgrade --yes' --defer
 outdated_banner --cache ~/.cache/plugins-outdated \
   --icon $'\U1F9E9'  --message '%s zsh plugin(s) behind upstream' \
+  --label 'zsh plugins' \
   --upgrade 'plugins-outdated-cache.sh --upgrade' --defer
 
 # ... rest of .zshrc (fnm init, ...) ...
 
-outdated_banner_prompt   # one "Update all of the above? [y/N]"
+outdated_banner_prompt   # gum confirm (default No), or y/N without gum
 ```
 
-The banners accumulate silently; `outdated_banner_prompt` prints them all and
-asks `y/N` once, then runs every collected `--upgrade` command (in order) on
-`y` or none of them on `n`.
+The banners accumulate silently; `outdated_banner_prompt` shows them all and
+covers every collected `--upgrade` command in one interaction.
 
-If your shell draws a backgrounded welcome splash (e.g. `fastfetch &`) that
-races the prompt — its ASCII art landing on top of the y/N — register it so the
-prompt waits for it to finish drawing first. The wait happens *only* when there
-are banners, so a clean shell pays nothing:
+If your shell draws a backgrounded welcome splash (e.g. `fastfetch`) that races
+the prompt — its ASCII art landing on top of the banners — launch it through
+`_out_bg_job_start` so the prompt waits for it to finish drawing first. The same
+call suppresses zsh's `[n] pid` / `[n] + done` job-control lines, which a bare
+`fastfetch &` prints around the prompt:
 
 ```zsh
-fastfetch &
-_out_register_bg_job $!   # after the &, .zshrc keeps running
+_out_bg_job_start fastfetch   # not `fastfetch &`; .zshrc keeps running
 # ...
-outdated_banner_prompt     # waits for fastfetch to draw, then shows the banners
+outdated_banner_prompt        # waits for fastfetch to draw, reaps it, then prompts
 ```
 
-Use a plain `&` (not `&!`/disowned) so the job stays waitable.
+It must be a plain background job (no `&!`/disown) so it stays waitable;
+`_out_bg_job_start` handles the option juggling and registers the PID for you.
+The wait is bounded (a watchdog TERMs a greeting that hangs for a few seconds),
+so a stuck probe cannot wedge startup.
+
+`_out_register_bg_job PID` remains available as the low-level primitive for a
+caller that launched the job itself — `fastfetch &` followed by
+`_out_register_bg_job $!` still works, it just does not suppress the spawn and
+completion lines the way `_out_bg_job_start` does.
 
 ## Licence
 
