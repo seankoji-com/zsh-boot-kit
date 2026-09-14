@@ -200,6 +200,11 @@ output over the progress view.
 Without gum the original single `y/N` prompt is used, so hosts that do not
 install it (some Pi/NAS setups) keep working unchanged.
 
+A banner used *without* `--defer` prompts on its own, through the same
+machinery: a styled `gum confirm` (default No) when gum is available, otherwise
+`y/N`. Its command runs in-process, so — unlike the deferred path's `zsh -c`
+child — it sees functions and unexported variables from `.zshrc`.
+
 `ZSH_BOOT_KIT_UI` picks the backend:
 
 | Value | Behaviour |

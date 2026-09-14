@@ -165,6 +165,44 @@ The output should include 'EXCLUDED 1'
 End
 End
 
+Describe 'the upgrade prompt with gum'
+Before 'interactive'
+
+# A stub `gum` function shadows any real binary; confirm honours
+# FAKE_GUM_CONFIRM so a test controls accept (0) vs decline (1).
+fake_gum() {
+  gum() {
+    case $1 in
+    confirm) return "${FAKE_GUM_CONFIRM:-0}" ;;
+    *) return 1 ;;
+    esac
+  }
+  _out_use_gum() { return 0; }
+}
+Before 'fake_gum'
+
+It 'uses a gum confirm and runs the command when accepted'
+run_it() {
+  FAKE_GUM_CONFIRM=0
+  print -l a >"$CACHE"
+  outdated_banner --cache "$CACHE" --message '%s thing' --upgrade 'print UPGRADED'
+}
+When call run_it
+The output should include 'UPGRADED'
+The output should not include 'Upgrade now? [y/N]'
+End
+
+It 'runs nothing when the gum confirm is declined'
+run_it() {
+  FAKE_GUM_CONFIRM=1
+  print -l a >"$CACHE"
+  outdated_banner --cache "$CACHE" --message '%s thing' --upgrade 'print UPGRADED'
+}
+When call run_it
+The output should not include 'UPGRADED'
+End
+End
+
 Describe 'argument validation'
 It 'requires --cache and --message'
 When call outdated_banner --cache /nope
