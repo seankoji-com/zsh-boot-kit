@@ -12,7 +12,8 @@
 #     --count MODE     lines   count of lines in the cache file (default)
 #                      content the file's contents, for a pre-computed number
 #                      none    no count; FMT is used as-is
-#     --upgrade CMD    offer an upgrade prompt and run CMD when chosen
+#     --upgrade CMD    offer an upgrade prompt and run CMD when chosen; with
+#                      gum it is a styled confirm (default No), otherwise y/N
 #     --label TEXT     short name for CMD used by the progress view, e.g.
 #                      "Homebrew packages". Defaults to the banner line.
 #     --progress       CMD emits the structured progress protocol on stdout
@@ -239,21 +240,29 @@ outdated_banner() {
 
   [[ -n "$upgrade" ]] || return 0
 
-  # When attached to a terminal, `read -k 1` puts the tty into cbreak mode so
-  # single keypresses (y/n) work without pressing Enter. When stdin is a pipe
-  # (such as under shellspec), read from fd 0 (-u 0) to avoid failing on the
-  # absence of a controlling terminal.
-  local began=$EPOCHREALTIME reply=''
-  print -n "  Upgrade now? [y/N] "
-  if [[ -t 0 ]]; then
-    read -k 1 reply
+  # Waiting on a human is not shell boot time; exclude the whole ask-and-run.
+  local began=$EPOCHREALTIME accept=0
+  if _out_use_gum; then
+    # Same styled confirm as the deferred flush (default No, so a bare Enter
+    # skips). The command runs in-process via eval, exactly as the plain path
+    # does, so it still sees .zshrc's functions and unexported variables.
+    gum confirm 'Upgrade now?' --affirmative 'Upgrade' --negative 'Skip' --default=false && accept=1 || true
   else
-    read -k 1 -u 0 reply
+    # When attached to a terminal, `read -k 1` puts the tty into cbreak mode so
+    # single keypresses (y/n) work without pressing Enter. When stdin is a pipe
+    # (such as under shellspec), read from fd 0 (-u 0) to avoid failing on the
+    # absence of a controlling terminal.
+    local reply=''
+    print -n "  Upgrade now? [y/N] "
+    if [[ -t 0 ]]; then
+      read -k 1 reply
+    else
+      read -k 1 -u 0 reply
+    fi
+    print
+    [[ $reply == [yY] ]] && accept=1 || true
   fi
-  print
-  if [[ $reply == [yY] ]]; then
-    eval "$upgrade"
-  fi
+  (( accept )) && eval "$upgrade"
   (( $+functions[boot_kit_exclude] )) && boot_kit_exclude $began
   return 0
 }
