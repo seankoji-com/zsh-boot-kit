@@ -164,7 +164,8 @@ depend on how slow `brew update` is.
 | `--message FMT` | printf format taking the count |
 | `--icon TEXT` | Prefix, usually an emoji |
 | `--count MODE` | `lines`, `content` (pre-computed number), or `none` |
-| `--upgrade CMD` | Offer a y/N prompt and run this on yes |
+| `--upgrade CMD` | Offer to run this command when the banner fires |
+| `--label TEXT` | Short name for `CMD` in the progress view (e.g. `Homebrew packages`); defaults to the banner text |
 | `--hint TEXT` | Trailing parenthetical (default `see <cache>`) |
 | `--defer` | Collect the banner instead of prompting immediately |
 
@@ -174,6 +175,20 @@ a literal `0`, is treated as "checked, nothing to do".
 
 The prompt wait and the upgrade run are handed to `boot_kit_exclude`, so the
 startup log stays honest on the days you actually upgrade.
+
+### The prompt
+
+With [gum](https://charm.sh) on `PATH` — it is in the dotfiles
+`Brewfile.common` — the deferred prompt renders the banners in a rounded box,
+then shows a multi-select menu of every system with an upgrade command
+(everything selected, so `Enter` updates all). Each chosen system runs under
+its own spinner with its output captured to a log; a one-line `✔`/`✘` reports
+the result, and a failure prints the log path instead of dumping output at the
+spinner.
+
+Without gum the original single `y/N` prompt is used, so hosts that do not
+install it (some Pi/NAS setups) keep working unchanged. `ZSH_BOOT_KIT_UI`
+overrides the choice: `gum` forces the gum path, `plain` forces `y/N`.
 
 ### Deferring several upgrades to one prompt
 
@@ -185,33 +200,35 @@ upgrade commands can run there):
 ```zsh
 outdated_banner --cache ~/.cache/brew-outdated   \
   --icon $'\U1F37A'  --message '%s Homebrew package(s) outdated' \
+  --label 'Homebrew packages' \
   --upgrade 'brew upgrade --yes' --defer
 outdated_banner --cache ~/.cache/plugins-outdated \
   --icon $'\U1F9E9'  --message '%s zsh plugin(s) behind upstream' \
+  --label 'zsh plugins' \
   --upgrade 'plugins-outdated-cache.sh --upgrade' --defer
 
 # ... rest of .zshrc (fnm init, ...) ...
 
-outdated_banner_prompt   # one "Update all of the above? [y/N]"
+outdated_banner_prompt   # gum multi-select, or a single y/N without gum
 ```
 
-The banners accumulate silently; `outdated_banner_prompt` prints them all and
-asks `y/N` once, then runs every collected `--upgrade` command (in order) on
-`y` or none of them on `n`.
+The banners accumulate silently; `outdated_banner_prompt` shows them all and
+covers every collected `--upgrade` command in one interaction.
 
-If your shell draws a backgrounded welcome splash (e.g. `fastfetch &`) that
-races the prompt — its ASCII art landing on top of the y/N — register it so the
-prompt waits for it to finish drawing first. The wait happens *only* when there
-are banners, so a clean shell pays nothing:
+If your shell draws a backgrounded welcome splash (e.g. `fastfetch`) that races
+the prompt — its ASCII art landing on top of the banners — launch it through
+`_out_bg_job_start` so the prompt waits for it to finish drawing first. The same
+call suppresses zsh's `[n] pid` / `[n] + done` job-control lines, which a bare
+`fastfetch &` prints around the prompt:
 
 ```zsh
-fastfetch &
-_out_register_bg_job $!   # after the &, .zshrc keeps running
+_out_bg_job_start fastfetch   # not `fastfetch &`; .zshrc keeps running
 # ...
-outdated_banner_prompt     # waits for fastfetch to draw, then shows the banners
+outdated_banner_prompt        # waits for fastfetch to draw, reaps it, then prompts
 ```
 
-Use a plain `&` (not `&!`/disowned) so the job stays waitable.
+It must be a plain background job (no `&!`/disown) so it stays waitable;
+`_out_bg_job_start` handles the option juggling and registers the PID for you.
 
 ## Licence
 

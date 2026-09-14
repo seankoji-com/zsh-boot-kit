@@ -188,7 +188,9 @@ Before 'reset_accumulator'
 reset_accumulator() {
   _out_banners_line=()
   _out_banners_upgrade=()
+  _out_banners_label=()
   _out_bg_job=0
+  _out_bg_notify=0
 }
 
 It 'collects banners silently, then prints them and prompts once on flush'
@@ -284,7 +286,7 @@ The output should include '1 thing'
 The variable _out_bg_job should equal 0
 End
 
-It 'does not wait when nothing was collected, even with a job registered'
+It 'reaps a registered job even when nothing was collected'
 reset_accumulator
 Mock 'wait'
 print "WAITING $1"
@@ -294,8 +296,204 @@ run_it() {
   outdated_banner_prompt
 }
 When call run_it
-The output should equal ''
+# The welcome job is reaped so zsh never prints "[n] done" at the prompt, but
+# with no banners there is nothing to show.
+The output should equal 'WAITING 99'
+The variable _out_bg_job should equal 0
 End
+End
+End
+
+Describe '_out_bg_job_start'
+It 'ignores an empty command'
+run_it() { _out_bg_job_start; }
+When call run_it
+The status should be success
+The variable _out_bg_job should equal 0
+End
+
+It 'launches the command and records a waitable PID'
+run_it() {
+  _out_bg_job_start true
+  local pid=$_out_bg_job
+  wait "$pid"
+  print "POSITIVE=$((pid > 0))"
+}
+When call run_it
+The output should include 'POSITIVE=1'
+End
+
+It 'suspends NOTIFY for the launch and restores it on reap'
+run_it() {
+  setopt notify
+  _out_bg_job_start true
+  print "START=$([[ -o notify ]] && print on || print off)"
+  _out_reap_bg_job
+  print "REAP=$([[ -o notify ]] && print on || print off)"
+}
+When call run_it
+The output should include 'START=off'
+The output should include 'REAP=on'
+End
+
+It 'leaves NOTIFY off if it was already off'
+run_it() {
+  unsetopt notify
+  _out_bg_job_start true
+  _out_reap_bg_job
+  print "AFTER=$([[ -o notify ]] && print on || print off)"
+}
+When call run_it
+The output should include 'AFTER=off'
+End
+End
+
+Describe 'the gum deferred UI'
+Before 'interactive'
+Before 'reset_accumulator'
+Before 'gum_env'
+reset_accumulator() {
+  _out_banners_line=()
+  _out_banners_upgrade=()
+  _out_banners_label=()
+  _out_bg_job=0
+  _out_bg_notify=0
+}
+
+# A fake gum(1) so the gum path is exercised without a terminal. It parses
+# only the flags this module actually passes; `choose` emits the values named
+# by FAKE_GUM_CHOOSE_OUT (all of them when unset), `spin` runs the command that
+# follows `--`, and `style` prints its trailing text argument or copies stdin.
+gum_env() {
+  FAKEBIN="$TMPROOT/bin"
+  FAKE_GUM_LOG="$TMPROOT/gum.log"
+  unset FAKE_GUM_CHOOSE_OUT FAKE_GUM_CHOOSE_RC
+  mkdir -p "$FAKEBIN"
+  cat >"$FAKEBIN/gum" <<'STUB'
+#!/bin/sh
+printf '%s %s\n' "$1" "$*" >> "$FAKE_GUM_LOG"
+cmd=$1; shift
+case "$cmd" in
+  choose)
+    if [ -n "${FAKE_GUM_CHOOSE_RC+x}" ]; then
+      [ -n "${FAKE_GUM_CHOOSE_OUT:-}" ] && printf '%s\n' ${FAKE_GUM_CHOOSE_OUT}
+      exit "$FAKE_GUM_CHOOSE_RC"
+    fi
+    if [ -n "${FAKE_GUM_CHOOSE_OUT+x}" ]; then
+      [ -n "$FAKE_GUM_CHOOSE_OUT" ] && printf '%s\n' $FAKE_GUM_CHOOSE_OUT
+      exit 0
+    fi
+    for a in "$@"; do
+      case "$a" in *'|'*) printf '%s\n' "${a##*|}" ;; esac
+    done
+    ;;
+  spin)
+    while [ $# -gt 0 ] && [ "$1" != "--" ]; do shift; done
+    [ "$1" = "--" ] && shift
+    "$@"
+    ;;
+  style)
+    text=''
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --padding|--margin|--border|--border-foreground|--foreground|--background|--border-background|--align|--width|--height) shift 2 ;;
+        -*) shift ;;
+        *) text=$1; shift ;;
+      esac
+    done
+    if [ -n "$text" ]; then printf '%s\n' "$text"; else cat; fi
+    ;;
+esac
+STUB
+  chmod +x "$FAKEBIN/gum"
+  export FAKE_GUM_LOG
+  export PATH="$FAKEBIN:$PATH"
+  export ZSH_BOOT_KIT_UI=gum
+}
+
+It 'shows a styled summary and runs every selected upgrade'
+run_it() {
+  MARK1="$TMPROOT/run1"
+  MARK2="$TMPROOT/run2"
+  print -l a >"$CACHE"
+  outdated_banner --cache "$CACHE" --icon ONE --message '%s brew thing' --label 'Homebrew' --defer --upgrade "touch $MARK1"
+  print -l a b >"$CACHE2"
+  outdated_banner --cache "$CACHE2" --icon TWO --message '%s npm thing' --label 'npm globals' --defer --upgrade "touch $MARK2"
+  outdated_banner_prompt
+}
+CACHE2="$TMPROOT/outdated2"
+When call run_it
+The output should include 'Updates available'
+The path "$MARK1" should be exist
+The path "$MARK2" should be exist
+The output should include '✔ Homebrew'
+The output should include '✔ npm globals'
+End
+
+It 'runs only the chosen systems'
+run_it() {
+  MARK1="$TMPROOT/run1"
+  MARK2="$TMPROOT/run2"
+  export FAKE_GUM_CHOOSE_OUT=2
+  print -l a >"$CACHE"
+  outdated_banner --cache "$CACHE" --message '%s brew thing' --label 'Homebrew' --defer --upgrade "touch $MARK1"
+  print -l a >"$CACHE2"
+  outdated_banner --cache "$CACHE2" --message '%s npm thing' --label 'npm globals' --defer --upgrade "touch $MARK2"
+  outdated_banner_prompt
+}
+CACHE2="$TMPROOT/outdated2"
+When call run_it
+The path "$MARK2" should be exist
+The path "$MARK1" should not be exist
+The output should not include '✔ Homebrew'
+End
+
+It 'skips everything when the menu is cancelled'
+run_it() {
+  MARK1="$TMPROOT/run1"
+  export FAKE_GUM_CHOOSE_RC=1
+  print -l a >"$CACHE"
+  outdated_banner --cache "$CACHE" --message '%s brew thing' --label 'Homebrew' --defer --upgrade "touch $MARK1"
+  outdated_banner_prompt
+}
+When call run_it
+The path "$MARK1" should not be exist
+The output should include 'Skipped.'
+End
+
+It 'runs nothing when the selection is empty'
+run_it() {
+  MARK1="$TMPROOT/run1"
+  export FAKE_GUM_CHOOSE_OUT=''
+  print -l a >"$CACHE"
+  outdated_banner --cache "$CACHE" --message '%s brew thing' --label 'Homebrew' --defer --upgrade "touch $MARK1"
+  outdated_banner_prompt
+}
+When call run_it
+The path "$MARK1" should not be exist
+The output should include 'Nothing selected.'
+End
+
+It 'reports a failed upgrade with its exit code'
+run_it() {
+  print -l a >"$CACHE"
+  outdated_banner --cache "$CACHE" --message '%s brew thing' --label 'Homebrew' --defer --upgrade 'exit 3'
+  outdated_banner_prompt
+}
+When call run_it
+The output should include '✘ Homebrew'
+The output should include 'exit 3'
+End
+
+It 'falls back to the banner text when no --label is given'
+run_it() {
+  print -l a >"$CACHE"
+  outdated_banner --cache "$CACHE" --message '%s brew thing' --defer --upgrade 'true'
+  outdated_banner_prompt
+}
+When call run_it
+The output should include '✔ 1 brew thing'
+The contents of file "$FAKE_GUM_LOG" should include '1 brew thing'
 End
 End
 End
