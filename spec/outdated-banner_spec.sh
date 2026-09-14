@@ -189,6 +189,7 @@ reset_accumulator() {
   _out_banners_line=()
   _out_banners_upgrade=()
   _out_banners_label=()
+  _out_banners_progress=()
   _out_bg_job=0
   _out_bg_notify=0
 }
@@ -356,6 +357,7 @@ reset_accumulator() {
   _out_banners_line=()
   _out_banners_upgrade=()
   _out_banners_label=()
+  _out_banners_progress=()
   _out_bg_job=0
   _out_bg_notify=0
 }
@@ -472,6 +474,45 @@ run_it() {
 When call run_it
 The output should include '✔ 1 brew thing'
 The contents of file "$FAKE_GUM_LOG" should include '1 brew thing'
+End
+
+It 'lists each item as it lands when the upgrade speaks --progress'
+run_it() {
+  print -l a >"$CACHE"
+  outdated_banner --cache "$CACHE" --message '%s thing' --label 'Widgets' --progress --defer \
+    --upgrade 'printf "@total 2\n@done alpha\n@done beta\n"'
+  outdated_banner_prompt
+}
+When call run_it
+The output should include '✔ alpha'
+The output should include '✔ beta'
+The output should include '✔ Widgets (2/2 updated)'
+The output should not include '@total'
+End
+
+It 'reports skipped and failed items, and flags the system in the summary'
+run_it() {
+  print -l a >"$CACHE"
+  outdated_banner --cache "$CACHE" --message '%s thing' --label 'Widgets' --progress --defer \
+    --upgrade 'printf "@total 3\n@done alpha\n@skip beta\n@fail gamma\n"; true'
+  outdated_banner_prompt
+}
+When call run_it
+The output should include '✔ alpha'
+The output should include '○ beta (skipped)'
+The output should include '✘ gamma'
+The output should include '✘ Widgets (1/3 updated, 1 failed)'
+End
+
+It 'treats a non-zero exit with no item failures as a failure'
+run_it() {
+  print -l a >"$CACHE"
+  outdated_banner --cache "$CACHE" --message '%s thing' --label 'Widgets' --progress --defer \
+    --upgrade 'exit 4'
+  outdated_banner_prompt
+}
+When call run_it
+The output should include '✘ Widgets (0/0 updated, exit 4)'
 End
 End
 End

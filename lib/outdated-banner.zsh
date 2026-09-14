@@ -15,6 +15,10 @@
 #     --upgrade CMD    offer an upgrade prompt and run CMD when chosen
 #     --label TEXT     short name for CMD used by the progress view, e.g.
 #                      "Homebrew packages". Defaults to the banner line.
+#     --progress       CMD emits the structured progress protocol on stdout
+#                      (@total/@done/@skip/@fail — see _out_run_upgrade_progress)
+#                      under ZSH_BOOT_KIT_PROGRESS=1, so the UI can list each
+#                      item as it lands instead of spinning blindly
 #     --hint TEXT      trailing parenthetical (defaults to "see <cache>")
 #     --defer          collect the banner instead of prompting immediately;
 #                      show it and prompt once via outdated_banner_prompt
@@ -23,13 +27,13 @@
 #     Print every banner collected with --defer, then offer to run the
 #     collected upgrade commands. With gum(1) on PATH and a terminal, the
 #     banners render in a styled box and a single confirm asks whether to run
-#     every collected upgrade (default is No, so a bare Enter skips); each then
-#     runs under its own spinner with a one-line result. Without gum the
-#     original y/N prompt is used. Before either, it waits (when a background
-#     welcome process was registered via _out_bg_job_start — typically
-#     fastfetch) so that process's output finishes drawing before the banners,
-#     and reaps it so zsh never prints a stray "[n] done" job line at the
-#     prompt.
+#     every collected upgrade (default is No, so a bare Enter skips). Each then
+#     runs under its own spinner, or — for --progress entries — prints a line
+#     per item as it lands, followed by a summary. Without gum the original y/N
+#     prompt is used. Before either, it waits (when a background welcome
+#     process was registered via _out_bg_job_start — typically fastfetch) so
+#     that process's output finishes drawing before the banners, and reaps it
+#     so zsh never prints a stray "[n] done" job line at the prompt.
 #
 #   _out_bg_job_start CMD [ARGS...]
 #     Launch a background, not-disowned welcome process (e.g. fastfetch) with
@@ -75,7 +79,7 @@ _outdated_banner_interactive() {
 # leftover outdated_banner_prompt flush these hold the rendered lines, their
 # upgrade commands, and a short label for each. All three are per-shell, so a
 # fresh zsh never inherits them.
-typeset -ga _out_banners_line _out_banners_upgrade _out_banners_label
+typeset -ga _out_banners_line _out_banners_upgrade _out_banners_label _out_banners_progress
 
 # Backgrounded, not-disowned welcome process (fastfetch) whose output should
 # finish drawing before the deferred prompt shows. 0 means none registered.
@@ -168,7 +172,7 @@ _out_reap_bg_job() {
 }
 
 outdated_banner() {
-  local cache='' message='' icon='' upgrade='' hint='' label='' count_mode=lines defer=0
+  local cache='' message='' icon='' upgrade='' hint='' label='' count_mode=lines defer=0 progress=0
 
   while (( $# )); do
     case $1 in
@@ -180,6 +184,7 @@ outdated_banner() {
       --hint)    hint=$2;       shift 2 ;;
       --count)   count_mode=$2; shift 2 ;;
       --defer)   defer=1;       shift ;;
+      --progress) progress=1;   shift ;;
       *) print -u2 "outdated_banner: unknown option '$1'"; return 1 ;;
     esac
   done
@@ -214,6 +219,7 @@ outdated_banner() {
     _out_banners_upgrade+=("$upgrade")
     : ${label:=$text}
     _out_banners_label+=("$label")
+    _out_banners_progress+=("$progress")
     return 0
   fi
 
@@ -298,8 +304,62 @@ _out_run_upgrade_gum() {
   return 0
 }
 
+# Run an upgrade marked --progress, reading its structured progress protocol
+# from stdout while everything else (and stderr) goes to the log:
+#
+#   @total N       how many items the run will process
+#   @done  NAME    one item succeeded
+#   @skip  NAME    one item was left alone (e.g. local changes)
+#   @fail  NAME    one item failed
+#
+# Each item prints as it lands, so a long install shows a growing list instead
+# of a silent spinner. The protocol is emitted by the dotfiles `*-outdated-cache`
+# scripts when ZSH_BOOT_KIT_PROGRESS=1; any upgrade command can opt in.
+_out_run_upgrade_progress() {
+  local idx=$1 label=$2 log=$3
+  local total=0 done=0 skipped=0 failed=0 line rc=1
+  local rcfile="$log.rc"
+  : >"$log"
+  : >"$rcfile"
+
+  while IFS= read -r line; do
+    case $line in
+      '@total '*) total=${line#@total } ;;
+      '@done '*)  done=$((done + 1));  gum style --foreground 42  "  ✔ ${line#@done }" ;;
+      '@skip '*)  skipped=$((skipped + 1)); gum style --foreground 214 "  ○ ${line#@skip } (skipped)" ;;
+      '@fail '*)  failed=$((failed + 1)); gum style --foreground 196 "  ✘ ${line#@fail }" ;;
+      *) print -r -- "$line" >>"$log" ;;
+    esac
+  done < <(_out_progress_stream "${_out_banners_upgrade[$idx]}" "$log" "$rcfile")
+
+  [[ -s "$rcfile" ]] && rc=$(<"$rcfile")
+
+  if (( failed > 0 || rc != 0 )); then
+    local why="exit ${rc}"
+    (( failed > 0 )) && why="${failed} failed"
+    gum style --foreground 196 "  ✘ ${label} (${done}/${total} updated, ${why}) — log: ${log}"
+  else
+    (( total == 0 )) && total=$done
+    local suffix=''
+    (( skipped > 0 )) && suffix=", ${skipped} skipped"
+    gum style --foreground 42 "  ✔ ${label} (${done}/${total} updated${suffix})"
+  fi
+  return 0
+}
+
+# Run the upgrade command as a child whose stdout the caller reads line by line.
+# ZSH_BOOT_KIT_PROGRESS tells the dotfiles cache scripts to emit the protocol
+# above instead of their human-readable list. The child's exit status is written
+# to a file because process substitution hides it from the caller.
+_out_progress_stream() {
+  local cmd=$1 log=$2 rcfile=$3
+  ZSH_BOOT_KIT_PROGRESS=1 sh -c "$cmd" 2>>"$log"
+  print -r -- $? >"$rcfile"
+}
+
 # The gum path: one binary confirm (default is No, so a bare Enter skips), then
-# a sequential spinner per collected upgrade command.
+# a sequential spinner (or progress list, for --progress entries) per collected
+# upgrade command.
 _out_prompt_gum() {
   local -a idxs=()
   local i
@@ -322,7 +382,11 @@ _out_prompt_gum() {
   for idx in "${idxs[@]}"; do
     name=${_out_banners_label[$idx]:-${_out_banners_line[$idx]}}
     log="$logdir/${idx}.log"
-    _out_run_upgrade_gum "$idx" "$name" "$log"
+    if [[ ${_out_banners_progress[$idx]:-0} == 1 ]]; then
+      _out_run_upgrade_progress "$idx" "$name" "$log"
+    else
+      _out_run_upgrade_gum "$idx" "$name" "$log"
+    fi
   done
   return 0
 }

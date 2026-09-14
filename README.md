@@ -166,6 +166,7 @@ depend on how slow `brew update` is.
 | `--count MODE` | `lines`, `content` (pre-computed number), or `none` |
 | `--upgrade CMD` | Offer to run this command when the banner fires |
 | `--label TEXT` | Short name for `CMD` in the progress view (e.g. `Homebrew packages`); defaults to the banner text |
+| `--progress` | `CMD` speaks the `@total`/`@done`/`@skip`/`@fail` protocol under `ZSH_BOOT_KIT_PROGRESS=1`, so the UI lists each item live instead of spinning |
 | `--hint TEXT` | Trailing parenthetical (default `see <cache>`) |
 | `--defer` | Collect the banner instead of prompting immediately |
 
@@ -181,13 +182,41 @@ startup log stays honest on the days you actually upgrade.
 With [gum](https://charm.sh) on `PATH` — it is in the dotfiles
 `Brewfile.common` — the deferred prompt renders the banners in a rounded box,
 then asks one confirm. The default is No, so a bare `Enter` skips everything;
-choosing Update runs every collected upgrade under its own spinner with output
-captured to a log, and a one-line `✔`/`✘` reports each result (a failure prints
-the log path instead of dumping output at the spinner).
+choosing Update runs every collected upgrade and reports each result. An upgrade
+marked `--progress` prints one line per item as it lands, from the structured
+protocol its command emits under `ZSH_BOOT_KIT_PROGRESS=1`:
+
+```
+  ✔ htop
+  ✔ git
+  ○ node (skipped)
+  ✔ Homebrew packages (2/3 updated, 1 skipped)
+```
+
+Anything else runs under a spinner with a one-line result. Item output is
+captured to a per-system log; a failure prints the log path instead of dumping
+output over the progress view.
 
 Without gum the original single `y/N` prompt is used, so hosts that do not
 install it (some Pi/NAS setups) keep working unchanged. `ZSH_BOOT_KIT_UI`
 overrides the choice: `gum` forces the gum path, `plain` forces `y/N`.
+
+### Progress protocol
+
+An `--progress` upgrade must print these lines on stdout when
+`ZSH_BOOT_KIT_PROGRESS=1` is set — and only then, so the plain `y/N` path keeps
+its original human-readable output:
+
+| Line | Meaning |
+|---|---|
+| `@total N` | How many items the run will process |
+| `@done NAME` | One item succeeded |
+| `@skip NAME` | One item was left alone (e.g. local changes) |
+| `@fail NAME` | One item failed |
+
+Anything else on stdout, and all stderr, goes to the log. The dotfiles
+`brew-outdated-cache.sh`, `plugins-outdated-cache.sh`, and
+`npm-outdated-cache.sh` all implement it for their `--upgrade` modes.
 
 ### Deferring several upgrades to one prompt
 
