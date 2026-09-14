@@ -102,35 +102,40 @@ _out_use_gum() {
 #
 # A plain `fastfetch &` prints "[n] pid" when it starts and "[n] + done" when
 # it finishes. Both are the interactive job table talking, not anything the
-# user asked to see. MONITOR is turned off just for the launch (which suppresses
-# the spawn line and still leaves the job waitable), and NOTIFY is suspended
-# until the deferred prompt reaps the job — so a completion that lands during
-# the rest of .zshrc is never announced.
+# user asked to see. MONITOR is off around the launch (which suppresses the
+# spawn line and still leaves the job waitable), and NOTIFY is suspended until
+# the deferred prompt reaps the job — so a completion that lands during the
+# rest of .zshrc is never announced.
 _out_bg_job_start() {
   (( $# )) || return 0
-  # MONITOR is restored immediately after the launch (the spawn line is emitted
-  # during it); NOTIFY stays off until _out_reap_bg_job restores it, so a
-  # completion during the rest of .zshrc is never announced. NOTIFY deliberately
-  # outlives the function, which rules out `setopt local_options`.
-  local had_monitor=0
-  [[ -o monitor ]] && had_monitor=1
-  unsetopt monitor
-  if [[ -o notify ]]; then
+  # Suspend NOTIFY once, and only if it is still on. A second call must not
+  # clear a pending suspension just because the first call already turned
+  # NOTIFY off: _out_reap_bg_job would then never restore it, silently killing
+  # job-completion notices for the life of the shell.
+  if (( ! _out_bg_notify )) && [[ -o notify ]]; then
     _out_bg_notify=1
-    unsetopt notify
-  else
-    _out_bg_notify=0
   fi
+  unsetopt notify
+  # One greeting is tracked; a second registration replaces the first rather
+  # than leaving it unreaped. The single in-tree caller launches exactly one.
+  _out_launch_bg "$@"
+  return 0
+}
+
+# Background a command with MONITOR scoped off via local_options: zsh restores
+# the caller's setting on return, so there is no manual save/restore branch to
+# get wrong. `_out_bg_job` is global, not local, so it survives.
+_out_launch_bg() {
+  setopt local_options no_monitor
   "$@" &
   _out_bg_job=$!
-  (( had_monitor )) && setopt monitor
-  return 0
 }
 
 # Record an already-running background job's PID for the deferred prompt to
 # wait on. Low-level companion to _out_bg_job_start for callers that manage
-# their own launch; accepts only an unsigned integer PID. Always returns
-# success so callers under `set -e` are never aborted.
+# their own launch (e.g. a plugin that adopts a job it started itself); accepts
+# only an unsigned integer PID. Always returns success so callers under
+# `set -e` are never aborted.
 _out_register_bg_job() {
   # `<->` is a numeric glob that only exists under extendedglob; scope it
   # locally so validation never depends on the caller's option state, and it
@@ -144,22 +149,29 @@ _out_register_bg_job() {
   return 0
 }
 
-# Wait for a registered welcome process to finish drawing, then clear it so a
-# later PID reuse can't make a future prompt block on an unrelated child.
+# Wait for a registered welcome process to finish drawing, bounded so a greeting
+# that hangs (a fastfetch probing a dead mount, a stuck --command block) cannot
+# wedge shell startup: a watchdog TERMs it after a few seconds.
 #
-# zsh's `wait` acts only on the shell's own child jobs: a PID for a process
-# already reaped, or one reused by an unrelated process, is not a child and
-# returns immediately (127) rather than blocking. `|| true` makes that a no-op
-# so a reaped greeting can't abort the shell under `set -e`.
+# MONITOR is scoped off so reaping does not print the job-status line
+# ("[n] + done ...") zsh would otherwise emit. zsh's `wait` acts only on the
+# shell's own children, so a PID already reaped, or reused by an unrelated
+# process, is not a child and returns immediately (127) rather than blocking;
+# `|| true` keeps that a no-op under `set -e`.
+_out_wait_bg() {
+  local pid=$1 watchdog
+  setopt local_options no_monitor
+  # Disowned so it never joins the job table; killed as soon as the real wait
+  # returns, so it cannot TERM a PID that has since been reused.
+  ( sleep 3; kill -TERM "$pid" 2>/dev/null ) &!
+  watchdog=$!
+  wait "$pid" 2>/dev/null || true
+  kill "$watchdog" 2>/dev/null || true
+}
+
 _out_reap_bg_job() {
   if (( _out_bg_job > 0 )); then
-    # MONITOR is off around `wait` so reaping does not print the job-status
-    # line ("[n] + done ...") zsh would otherwise emit; restored afterwards.
-    local had_monitor=0
-    [[ -o monitor ]] && had_monitor=1
-    unsetopt monitor
-    wait "$_out_bg_job" 2>/dev/null || true
-    (( had_monitor )) && setopt monitor
+    _out_wait_bg "$_out_bg_job"
     _out_bg_job=0
   fi
   # Restore NOTIFY if _out_bg_job_start suspended it. Done here rather than in
@@ -291,11 +303,14 @@ _out_prompt_plain() {
 # inspection.
 _out_run_upgrade_gum() {
   local idx=$1 label=$2 log=$3 rc=0
-  # `exec >log 2>&1` redirects the whole command, not just its last element: a
-  # `a && b` upgrade would otherwise leak a's output onto the spinner view.
+  # Run through zsh, the same interpreter the plain path evals in, and hand the
+  # command and log over as arguments rather than interpolating them: `%q`
+  # emits `$'...'` for paths needing escapes, which POSIX sh cannot parse.
+  # `exec >log 2>&1` redirects the whole command, not just its last element, so
+  # an `a && b` upgrade cannot leak a's output over the spinner.
   gum spin --spinner dot --spinner.foreground 212 \
     --title "Updating ${label}…" \
-    -- sh -c "exec >$(printf '%q' "$log") 2>&1; ${_out_banners_upgrade[$idx]}" || rc=$?
+    -- zsh -c 'exec >"$1" 2>&1; eval "$2"' _ "$log" "${_out_banners_upgrade[$idx]}" || rc=$?
   if (( rc == 0 )); then
     gum style --foreground 42 "  ✔ ${label}"
   else
@@ -353,7 +368,10 @@ _out_run_upgrade_progress() {
 # to a file because process substitution hides it from the caller.
 _out_progress_stream() {
   local cmd=$1 log=$2 rcfile=$3
-  ZSH_BOOT_KIT_PROGRESS=1 sh -c "$cmd" 2>>"$log"
+  # zsh, matching the plain path's interpreter, with the command passed as an
+  # argument so nothing needs quoting. stderr goes to the log; stdout stays the
+  # pipe the caller reads the protocol from.
+  ZSH_BOOT_KIT_PROGRESS=1 zsh -c 'eval "$1"' _ "$cmd" 2>>"$log"
   print -r -- $? >"$rcfile"
 }
 
@@ -376,6 +394,11 @@ _out_prompt_gum() {
     --affirmative 'Update' --negative 'Skip' --default=false || return 0
 
   local logdir="${TMPDIR:-/tmp}/zsh-boot-kit-updates-$$"
+  # One transcript per system lives here. PIDs churn, so prune previous runs
+  # older than a day rather than letting the directory accumulate until the OS
+  # tmp reaper gets to it.
+  find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'zsh-boot-kit-updates-*' -type d -mtime +1 \
+    -exec rm -rf {} + 2>/dev/null
   mkdir -p "$logdir" 2>/dev/null
 
   local idx name log

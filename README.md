@@ -198,8 +198,15 @@ captured to a per-system log; a failure prints the log path instead of dumping
 output over the progress view.
 
 Without gum the original single `y/N` prompt is used, so hosts that do not
-install it (some Pi/NAS setups) keep working unchanged. `ZSH_BOOT_KIT_UI`
-overrides the choice: `gum` forces the gum path, `plain` forces `y/N`.
+install it (some Pi/NAS setups) keep working unchanged.
+
+`ZSH_BOOT_KIT_UI` picks the backend:
+
+| Value | Behaviour |
+|---|---|
+| `auto` (default) | gum when it is installed **and stdout is a terminal**, otherwise `y/N` |
+| `gum` | gum when it is installed, otherwise `y/N` (it is a preference, not a hard force) |
+| `plain` | always `y/N` |
 
 ### Progress protocol
 
@@ -217,6 +224,15 @@ its original human-readable output:
 Anything else on stdout, and all stderr, goes to the log. The dotfiles
 `brew-outdated-cache.sh`, `plugins-outdated-cache.sh`, and
 `npm-outdated-cache.sh` all implement it for their `--upgrade` modes.
+
+### What `--upgrade` runs against
+
+Both backends run the command through zsh (`eval` in the plain path; `zsh -c`
+under gum), so zsh syntax works either way. Under gum it is a *child* process,
+though: shell functions, aliases, and unexported variables defined earlier in
+`.zshrc` are not visible to it. Write an `--upgrade` command as a self-contained
+invocation (the dotfiles ones are script calls) and it behaves the same on a
+host without gum.
 
 ### Deferring several upgrades to one prompt
 
@@ -257,6 +273,13 @@ outdated_banner_prompt        # waits for fastfetch to draw, reaps it, then prom
 
 It must be a plain background job (no `&!`/disown) so it stays waitable;
 `_out_bg_job_start` handles the option juggling and registers the PID for you.
+The wait is bounded (a watchdog TERMs a greeting that hangs for a few seconds),
+so a stuck probe cannot wedge startup.
+
+`_out_register_bg_job PID` remains available as the low-level primitive for a
+caller that launched the job itself — `fastfetch &` followed by
+`_out_register_bg_job $!` still works, it just does not suppress the spawn and
+completion lines the way `_out_bg_job_start` does.
 
 ## Licence
 

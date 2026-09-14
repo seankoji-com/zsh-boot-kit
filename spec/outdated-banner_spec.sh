@@ -313,15 +313,32 @@ The status should be success
 The variable _out_bg_job should equal 0
 End
 
-It 'launches the command and records a waitable PID'
+It 'runs the launched command'
 run_it() {
-  _out_bg_job_start true
-  local pid=$_out_bg_job
-  wait "$pid"
-  print "POSITIVE=$((pid > 0))"
+  MARK="$TMPROOT/bg-ran"
+  _out_bg_job_start touch "$MARK"
+  _out_reap_bg_job
+  print "RAN=$([[ -f $MARK ]] && print yes || print no)"
 }
 When call run_it
-The output should include 'POSITIVE=1'
+The output should include 'RAN=yes'
+End
+
+# MONITOR cannot be enabled in shellspec (no job control), so this asserts the
+# setting is left as found rather than toggled on and stranded. The launch and
+# reap both scope MONITOR off with local_options, which zsh restores on return —
+# there is no manual save/restore branch left to regress.
+It 'leaves MONITOR as it found it across launch and reap'
+run_it() {
+  print "BEFORE=$([[ -o monitor ]] && print on || print off)"
+  _out_bg_job_start true
+  print "LAUNCH=$([[ -o monitor ]] && print on || print off)"
+  _out_reap_bg_job
+  print "REAP=$([[ -o monitor ]] && print on || print off)"
+}
+When call run_it
+The output should include 'LAUNCH=off'
+The output should include 'REAP=off'
 End
 
 It 'suspends NOTIFY for the launch and restores it on reap'
@@ -347,6 +364,21 @@ run_it() {
 When call run_it
 The output should include 'AFTER=off'
 End
+
+# A second launch used to see NOTIFY already off and zero the pending
+# suspension, so the reap never restored it and the shell lost job-completion
+# notices for good.
+It 'keeps a pending NOTIFY suspension across a second launch'
+run_it() {
+  setopt notify
+  _out_bg_job_start true
+  _out_bg_job_start true
+  _out_reap_bg_job
+  print "AFTER=$([[ -o notify ]] && print on || print off)"
+}
+When call run_it
+The output should include 'AFTER=on'
+End
 End
 
 Describe 'the gum deferred UI'
@@ -362,10 +394,11 @@ reset_accumulator() {
   _out_bg_notify=0
 }
 
-# A fake gum(1) so the gum path is exercised without a terminal. It parses
-# only the flags this module actually passes; `confirm` exits with
-# FAKE_GUM_CONFIRM (0 by default), `spin` runs the command that follows `--`,
-# and `style` prints its trailing text argument or copies stdin.
+# A fake gum(1) so the gum path is exercised without a terminal. It parses the
+# flags this module actually passes and rejects anything else, so a typo'd or
+# unsupported flag fails the suite instead of being swallowed. `confirm` exits
+# with FAKE_GUM_CONFIRM (0 by default), `spin` runs the command after `--`, and
+# `style` prints its trailing text argument or copies stdin.
 gum_env() {
   FAKEBIN="$TMPROOT/bin"
   FAKE_GUM_LOG="$TMPROOT/gum.log"
@@ -377,10 +410,19 @@ printf '%s %s\n' "$1" "$*" >> "$FAKE_GUM_LOG"
 cmd=$1; shift
 case "$cmd" in
   confirm)
+    case " $* " in
+      *' --default=false '*) ;;
+      *) echo "gum-stub: unexpected confirm flags: $*" >&2; exit 2 ;;
+    esac
     exit "${FAKE_GUM_CONFIRM:-0}"
     ;;
   spin)
-    while [ $# -gt 0 ] && [ "$1" != "--" ]; do shift; done
+    while [ $# -gt 0 ] && [ "$1" != "--" ]; do
+      case "$1" in
+        --spinner | --spinner.foreground | --title) shift 2 ;;
+        *) echo "gum-stub: unexpected spin flag: $1" >&2; exit 2 ;;
+      esac
+    done
     [ "$1" = "--" ] && shift
     "$@"
     ;;
@@ -388,12 +430,16 @@ case "$cmd" in
     text=''
     while [ $# -gt 0 ]; do
       case "$1" in
-        --padding|--margin|--border|--border-foreground|--foreground|--background|--border-background|--align|--width|--height) shift 2 ;;
+        --padding | --margin | --border | --border-foreground | --foreground | --background | --border-background | --align | --width | --height) shift 2 ;;
         -*) shift ;;
         *) text=$1; shift ;;
       esac
     done
     if [ -n "$text" ]; then printf '%s\n' "$text"; else cat; fi
+    ;;
+  *)
+    echo "gum-stub: unknown subcommand '$cmd'" >&2
+    exit 2
     ;;
 esac
 STUB
@@ -513,6 +559,82 @@ run_it() {
 }
 When call run_it
 The output should include '✘ Widgets (0/0 updated, exit 4)'
+End
+
+# Only banners with an --upgrade are runnable; a gap between them must not
+# shift which command an index resolves to.
+It 'runs the upgradable banners and skips a gap in the middle'
+run_it() {
+  MARK1="$TMPROOT/run1"
+  MARK3="$TMPROOT/run3"
+  print -l a >"$CACHE"
+  outdated_banner --cache "$CACHE" --message '%s one' --label 'One' --defer --upgrade "touch $MARK1"
+  print -l a >"$CACHE2"
+  outdated_banner --cache "$CACHE2" --message '%s two' --label 'Two' --defer
+  print -l a >"$CACHE3"
+  outdated_banner --cache "$CACHE3" --message '%s three' --label 'Three' --defer --upgrade "touch $MARK3"
+  outdated_banner_prompt
+}
+CACHE2="$TMPROOT/outdated2"
+CACHE3="$TMPROOT/outdated3"
+When call run_it
+The path "$MARK1" should be exist
+The path "$MARK3" should be exist
+The output should include '✔ One'
+The output should include '✔ Three'
+The output should not include '✔ Two'
+End
+
+It 'shows the box but asks nothing when no banner can be upgraded'
+run_it() {
+  print -l a >"$CACHE"
+  outdated_banner --cache "$CACHE" --message '%s thing' --defer
+  outdated_banner_prompt
+}
+When call run_it
+The output should include 'Updates available'
+The contents of file "$FAKE_GUM_LOG" should not include 'confirm'
+End
+End
+
+Describe 'backend selection'
+Before 'interactive'
+Before 'reset_accumulator'
+reset_accumulator() {
+  _out_banners_line=()
+  _out_banners_upgrade=()
+  _out_banners_label=()
+  _out_banners_progress=()
+  _out_bg_job=0
+  _out_bg_notify=0
+}
+
+It 'stays plain under auto when gum is present but stdout is not a terminal'
+run_it() {
+  FAKEBIN="$TMPROOT/bin"
+  mkdir -p "$FAKEBIN"
+  printf '#!/bin/sh\nexit 0\n' >"$FAKEBIN/gum"
+  chmod +x "$FAKEBIN/gum"
+  export PATH="$FAKEBIN:$PATH"
+  unset ZSH_BOOT_KIT_UI
+  print -l a >"$CACHE"
+  outdated_banner --cache "$CACHE" --message '%s thing' --defer --upgrade 'true'
+  outdated_banner_prompt
+}
+When call run_it
+The output should include '[y/N]'
+End
+
+It 'stays plain when gum is forced but absent'
+run_it() {
+  ZSH_BOOT_KIT_UI=gum
+  PATH=/usr/bin:/bin
+  print -l a >"$CACHE"
+  outdated_banner --cache "$CACHE" --message '%s thing' --defer --upgrade 'true'
+  outdated_banner_prompt
+}
+When call run_it
+The output should include '[y/N]'
 End
 End
 End
