@@ -296,4 +296,32 @@ EOF
       The output should equal 'CLEAN'
     End
   End
+  Describe 'argument and status preservation'
+    Parameters
+      function
+      alias
+    End
+    It "preserves empty arguments and shell metacharacters through a $1 trigger"
+      run_it() {
+        mkdir -p "$ZSH_CUSTOM/plugins/quoted"
+        cat > "$ZSH_CUSTOM/plugins/quoted/quoted.plugin.zsh" <<'EOF'
+quoted_impl() { printf '<%s>\n' "$@"; return 23; }
+EOF
+        if [[ "$1" == alias ]]; then
+          print -r -- "alias quoted='quoted_impl'" >> "$ZSH_CUSTOM/plugins/quoted/quoted.plugin.zsh"
+        else
+          print -r -- 'quoted() { quoted_impl "$@"; }' >> "$ZSH_CUSTOM/plugins/quoted/quoted.plugin.zsh"
+        fi
+        lazy_plugins quoted
+        quoted '' 'two words' '$(touch should-not-exist)' '*'
+      }
+      When call run_it "$1"
+      The status should equal 23
+      The line 1 of output should equal '<>'
+      The line 2 of output should equal '<two words>'
+      The line 3 of output should equal '<$(touch should-not-exist)>'
+      The line 4 of output should equal '<*>'
+    End
+  End
+
 End
