@@ -55,6 +55,13 @@ previous mark. `prompt` is added automatically and covers the gap between your
 last mark and the prompt actually appearing, which is where theme
 initialisation shows up.
 
+If a plugin manager defers some loading past the first prompt (zinit Turbo),
+name a phase in `ZSH_BOOT_KIT_LOG_AFTER` and mark it when that work is done —
+`atload'boot_kit_mark ready'` on the last Turbo plugin. The line then carries
+`prompt=` for the first prompt and `ready=` for the deferred work, with the
+total running to the ready mark; if the mark never arrives the line is written
+on the second prompt instead.
+
 Read it back with `startup-log [n]` and `startup-stats`. Override the location
 with `ZSH_BOOT_KIT_LOG`.
 
