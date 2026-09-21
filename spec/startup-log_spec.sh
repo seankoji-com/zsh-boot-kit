@@ -86,6 +86,74 @@ Describe 'startup-log.zsh'
     End
   End
 
+  Describe 'ZSH_BOOT_KIT_LOG_AFTER'
+    # Deferred loading (zinit Turbo) finishes after the first prompt. The first
+    # prompt becomes its own phase and the line waits for the named mark.
+    It 'writes the line when the deferred phase is marked after the prompt'
+      run_it() {
+        ZSH_BOOT_KIT_LOG_AFTER=ready
+        boot_kit_timer_start
+        boot_kit_mark pre
+        boot_kit_log_on_first_prompt
+        _boot_kit_first_prompt
+        [[ -s "$ZSH_BOOT_KIT_LOG" ]] && print EARLY
+        boot_kit_mark ready
+        print -r -- "$(<$ZSH_BOOT_KIT_LOG)"
+      }
+      When call run_it
+      The output should match pattern '*pre=*prompt=*ready=*'
+      The output should not include 'EARLY'
+    End
+
+    # Provisioning and tests load everything eagerly, so the mark lands before
+    # the prompt; the first prompt still writes the line.
+    It 'writes at the first prompt when the phase was marked before it'
+      run_it() {
+        ZSH_BOOT_KIT_LOG_AFTER=ready
+        boot_kit_timer_start
+        boot_kit_mark pre
+        boot_kit_mark ready
+        boot_kit_log_on_first_prompt
+        _boot_kit_first_prompt
+        print -r -- "$(<$ZSH_BOOT_KIT_LOG)"
+      }
+      When call run_it
+      The output should match pattern '*pre=*ready=*prompt=*'
+    End
+
+    It 'falls back to the second prompt when the phase never arrives'
+      run_it() {
+        ZSH_BOOT_KIT_LOG_AFTER=ready
+        boot_kit_timer_start
+        boot_kit_mark pre
+        boot_kit_log_on_first_prompt
+        _boot_kit_first_prompt
+        [[ -s "$ZSH_BOOT_KIT_LOG" ]] && print EARLY
+        _boot_kit_write_log
+        print -r -- "$(<$ZSH_BOOT_KIT_LOG)"
+      }
+      When call run_it
+      The output should match pattern '*pre=*prompt=*'
+      The output should not include 'EARLY'
+      The output should not include 'ready='
+    End
+
+    It 'ignores marks that arrive after the line was written'
+      run_it() {
+        ZSH_BOOT_KIT_LOG_AFTER=ready
+        boot_kit_timer_start
+        boot_kit_mark pre
+        boot_kit_log_on_first_prompt
+        _boot_kit_first_prompt
+        _boot_kit_write_log
+        boot_kit_mark ready
+        wc -l < "$ZSH_BOOT_KIT_LOG" | tr -d ' '
+      }
+      When call run_it
+      The output should equal '1'
+    End
+  End
+
   Describe 'boot_kit_exclude'
     # Subtracting a blocking stretch means advancing T0, so the measured total
     # shrinks by however long the block lasted.
