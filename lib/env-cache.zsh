@@ -102,9 +102,16 @@ env_cache() {
   fi
 
   mkdir -p "${file:h}" 2>/dev/null || return 0
-  # umask, not a chmod afterwards: there is no window where the file exists
-  # world-readable.
-  ( umask 077; print -r -- "$value" > "$file" )
+  # Replace the inode rather than truncating it: a rejected cache may still
+  # be a symlink, a hard link, or world-readable. Never write secrets through
+  # that old inode. mktemp creates the replacement mode 0600 before writing.
+  [[ ! -d "$file" ]] || return 0
+  local tmp
+  tmp=$(mktemp "${file}.XXXXXX") || return 0
+  if ! print -r -- "$value" > "$tmp" || ! mv -f -- "$tmp" "$file"; then
+    rm -f -- "$tmp"
+  fi
+  return 0
 }
 
 env_cache_invalidate() {

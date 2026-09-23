@@ -2,23 +2,18 @@ name: shellspec
 
 on:
   push:
+    branches: [main]
   pull_request:
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
-    # GitHub-hosted, not the org's self-hosted runners: this repo is public and
-    # a self-hosted runner would execute code from fork pull requests.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install zsh
-        run: sudo apt-get update && sudo apt-get install -y zsh
-
-      - name: Install shellspec
-        run: |
-          curl -fsSL https://git.io/shellspec | sh -s -- -y
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Run shellspec
-        run: shellspec
+    uses: seankoji-com/.github/.github/workflows/reusable-shellspec.yml@e909fe7e3ca259b74359e0f6788d3da49d993830

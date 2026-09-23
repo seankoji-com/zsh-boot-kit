@@ -67,9 +67,12 @@ Describe 'env-cache.zsh'
         unset MYTOK
         env_cache MYTOK --ttl 3600 --command 'print -r -- tok_refetched' --file "$CACHE"
         print -r -- "$MYTOK"
+        local -A st; zstat -H st "$CACHE"
+        print $(( st[mode] & 8#777 ))
       }
       When call loosen_then_read
-      The output should equal 'tok_refetched'
+      The line 1 of output should equal 'tok_refetched'
+      The line 2 of output should equal "$(( 8#600 ))"
     End
 
     It 'rejects a symlink standing in for the cache file'
@@ -82,6 +85,38 @@ Describe 'env-cache.zsh'
       }
       When call symlink_then_read
       The output should equal 'tok_real'
+      The contents of file "$TMPROOT/planted" should equal 'tok_planted'
+      The path "$CACHE" should not be symlink
+      The contents of file "$CACHE" should equal 'tok_real'
+    End
+
+    It 'replaces a stale hard-linked cache without changing its other name'
+      hardlink_then_read() {
+        print -r -- tok_old > "$TMPROOT/original"
+        chmod 600 "$TMPROOT/original"
+        ln "$TMPROOT/original" "$CACHE"
+        env_cache MYTOK --ttl 0 --command 'print -r -- tok_real' --file "$CACHE"
+      }
+      When call hardlink_then_read
+      The status should be success
+      The contents of file "$TMPROOT/original" should equal 'tok_old'
+      The contents of file "$CACHE" should equal 'tok_real'
+    End
+
+    It 'keeps the previous cache and removes temporary files if replacement fails'
+      failed_replace() {
+        print -r -- tok_old > "$CACHE"
+        chmod 600 "$CACHE"
+        mv() { return 1; }
+        env_cache MYTOK --ttl 0 --command 'print -r -- tok_real' --file "$CACHE"
+        local -a leftovers=("$CACHE".*(N))
+        print -r -- "${#leftovers}"
+      }
+      When call failed_replace
+      The status should be success
+      The output should equal 0
+      The variable MYTOK should equal 'tok_real'
+      The contents of file "$CACHE" should equal 'tok_old'
     End
   End
 
