@@ -21,15 +21,15 @@ only structural check on it.
   this prompt.
 - `lib/env-cache.zsh` — the pre-read trust check in `_env_cache_usable`
   (symlink rejected via `-L` *before* the `-f`/`-O` tests that would
-  otherwise follow it) and the umask-not-chmod write. This module caches
+  otherwise follow it) and the mode-0600 temporary-file replacement. This module caches
   secrets like `GITHUB_PAT` in plaintext by design; reordering those checks
-  or swapping in a chmod-after-write reopens a real race, not a style nit.
+  or writing through the rejected inode can expose secrets or overwrite a
+  symlink target. Check both the exported value and the filesystem effects.
 
 ## Do not spend attention here
-- `.github/workflows/*.yml` — caller templates synced from the org's
-  `seankoji-com/.github` repo by a recurring bot PR (3 of this repo's 6
-  closed PRs are exactly that sync). Not hand-authored here, and it's the
-  one place CodeQL actually runs (workflow-injection is its stated target).
+- Unchanged `call-reusable-*.yml` template content can be checked against
+  the central source. Review local workflow changes, including caller
+  triggers, permissions, runner choices, and pinned revisions.
 - `README.md` — documentation prose, no executable path.
 - `LICENSE`, `.gitignore`, `.shellspec` — boilerplate config, nothing to
   review.
