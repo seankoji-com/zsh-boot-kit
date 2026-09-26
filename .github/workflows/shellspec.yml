@@ -1,24 +1,26 @@
-name: shellspec
+name: ShellSpec
 
 on:
-  push:
   pull_request:
+  push:
+    branches:
+      - main
 
 jobs:
-  test:
-    # GitHub-hosted, not the org's self-hosted runners: this repo is public and
-    # a self-hosted runner would execute code from fork pull requests.
+  shellspec:
+    uses: seankoji-com/.github/.github/workflows/reusable-shellspec.yml@main
+
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install zsh
-        run: sudo apt-get update && sudo apt-get install -y zsh
-
-      - name: Install shellspec
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Lint zsh files
         run: |
-          curl -fsSL https://git.io/shellspec | sh -s -- -y
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Run shellspec
-        run: shellspec
+          for file in *.zsh lib/*.zsh completions/* 2>/dev/null; do
+            if [ -f "$file" ]; then
+              echo "Checking $file..."
+              zsh -n "$file" || exit 1
+            fi
+          done
