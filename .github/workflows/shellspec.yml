@@ -19,3 +19,42 @@ concurrency:
 jobs:
   test:
     uses: seankoji-com/.github/.github/workflows/reusable-shellspec.yml@dd88aa86a37bd8e3f7f3c036af63d88f8d35bb49
+
+  lint:
+    # Syntax gate: `zsh -n` parses every zsh source without executing it.
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install zsh
+        run: |
+          if ! command -v zsh >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends zsh
+          fi
+          zsh --version
+      - name: Parse zsh files
+        run: |
+          mapfile -d '' files < <(
+            find . -path ./.git -prune -o -type f \( \
+              -name '*.zsh' -o -name '*.zsh-theme' -o -path '*/completions/_*' \
+            \) -print0
+          )
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::No zsh files found to check"
+            exit 1
+          fi
+          failed=0
+          for file in "${files[@]}"; do
+            echo "Checking $file..."
+            if ! zsh -n "$file" < /dev/null; then
+              echo "::error file=$file::zsh -n failed"
+              failed=1
+            fi
+          done
+          echo "Checked ${#files[@]} file(s)."
+          exit "$failed"
