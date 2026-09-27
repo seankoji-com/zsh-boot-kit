@@ -9,6 +9,7 @@ name: CodeQL analysis
 # box-tick: workflow injection through untrusted inputs is the failure mode
 # that actually applies to a repo like this one.
 
+# Restore merge_group coverage here before enabling a repository merge queue.
 on:
   push:
     branches: [main]
