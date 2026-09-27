@@ -1,14 +1,24 @@
-name: ShellSpec
+name: shellspec
 
 on:
-  pull_request:
   push:
-    branches:
-      - main
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Merge queues remain unsupported by the central gatekeeper.
+# The pinned zero-input workflow uses GitHub-hosted Ubuntu, installs zsh, and
+# honors this repository's .shellspec settings. Review that contract on updates.
 jobs:
-  shellspec:
-    uses: seankoji-com/.github/.github/workflows/reusable-shellspec.yml@main
+  test:
+    uses: seankoji-com/.github/.github/workflows/reusable-shellspec.yml@dd88aa86a37bd8e3f7f3c036af63d88f8d35bb49
 
   lint:
     name: Lint

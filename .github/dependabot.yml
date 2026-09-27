@@ -4,3 +4,11 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    # Review merged organization workflow changes before updating these pins.
+    ignore:
+      - dependency-name: "seankoji-com/.github"
+      - dependency-name: "seankoji-com/.github/.github/workflows/*"
