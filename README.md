@@ -296,3 +296,9 @@ completion lines the way `_out_bg_job_start` does.
 ## Licence
 
 MIT
+
+Cache writes replace the old inode with a private temporary file. Failed writes
+leave the exported value usable and warn unless `--quiet` is set. The writer
+cleans its own temporary file on HUP, INT, TERM, and normal exit. SIGKILL and
+power loss can leave an orphan; invalidation deletes only the exact cache file,
+never sibling files or another writer's temporary file.

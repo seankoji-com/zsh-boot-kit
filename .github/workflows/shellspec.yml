@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  merge_group:
   workflow_dispatch:
 
 permissions:
@@ -14,6 +13,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# Merge queues remain unsupported by the central gatekeeper.
+# The pinned zero-input workflow uses GitHub-hosted Ubuntu, installs zsh, and
+# honors this repository's .shellspec settings. Review that contract on updates.
 jobs:
   test:
-    uses: seankoji-com/.github/.github/workflows/reusable-shellspec.yml@e909fe7e3ca259b74359e0f6788d3da49d993830
+    uses: seankoji-com/.github/.github/workflows/reusable-shellspec.yml@dd88aa86a37bd8e3f7f3c036af63d88f8d35bb49

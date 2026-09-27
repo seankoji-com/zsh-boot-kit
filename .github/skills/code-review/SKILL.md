@@ -26,10 +26,13 @@ only structural check on it.
   or writing through the rejected inode can expose secrets or overwrite a
   symlink target. Check both the exported value and the filesystem effects.
 
+- Review local workflow changes, including reusable caller triggers,
+  permissions, runner choices, and pinned revisions.
+
 ## Do not spend attention here
-- Unchanged `call-reusable-*.yml` template content can be checked against
-  the central source. Review local workflow changes, including caller
-  triggers, permissions, runner choices, and pinned revisions.
+
+- Unchanged reusable workflow template content can be checked against its
+  central source; review any local changes.
 - `README.md` — documentation prose, no executable path.
 - `LICENSE`, `.gitignore`, `.shellspec` — boilerplate config, nothing to
   review.

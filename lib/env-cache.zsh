@@ -101,15 +101,20 @@ env_cache() {
     return 0
   fi
 
-  mkdir -p "${file:h}" 2>/dev/null || return 0
-  # Replace the inode rather than truncating it: a rejected cache may still
-  # be a symlink, a hard link, or world-readable. Never write secrets through
-  # that old inode. mktemp creates the replacement mode 0600 before writing.
-  [[ ! -d "$file" ]] || return 0
-  local tmp
-  tmp=$(mktemp "${file}.XXXXXX") || return 0
-  if ! print -r -- "$value" > "$tmp" || ! mv -f -- "$tmp" "$file"; then
-    rm -f -- "$tmp"
+  # Keep traps local to this writer and remove only its own temporary file.
+  # SIGKILL and power loss cannot run cleanup; invalidation never deletes siblings.
+  if ! (
+    local tmp=''
+    trap '[[ -z "$tmp" ]] || rm -f -- "$tmp"' EXIT
+    trap 'exit 1' HUP INT TERM
+    mkdir -p "${file:h}" 2>/dev/null || exit 1
+    [[ ! -d "$file" ]] || exit 1
+    tmp=$(mktemp "${file}.XXXXXX") || exit 1
+    # mktemp already created the private file, so allow NO_CLOBBER callers.
+    print -r -- "$value" >| "$tmp" || exit 1
+    mv -f -- "$tmp" "$file" || exit 1
+  ); then
+    (( quiet )) || print -u2 "env_cache: $var set but cache write failed"
   fi
   return 0
 }
