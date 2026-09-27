@@ -2,23 +2,20 @@ name: shellspec
 
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Merge queues remain unsupported by the central gatekeeper.
+# The pinned zero-input workflow uses GitHub-hosted Ubuntu, installs zsh, and
+# honors this repository's .shellspec settings. Review that contract on updates.
 jobs:
   test:
-    # GitHub-hosted, not the org's self-hosted runners: this repo is public and
-    # a self-hosted runner would execute code from fork pull requests.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install zsh
-        run: sudo apt-get update && sudo apt-get install -y zsh
-
-      - name: Install shellspec
-        run: |
-          curl -fsSL https://git.io/shellspec | sh -s -- -y
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Run shellspec
-        run: shellspec
+    uses: seankoji-com/.github/.github/workflows/reusable-shellspec.yml@dd88aa86a37bd8e3f7f3c036af63d88f8d35bb49

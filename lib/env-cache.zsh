@@ -101,10 +101,22 @@ env_cache() {
     return 0
   fi
 
-  mkdir -p "${file:h}" 2>/dev/null || return 0
-  # umask, not a chmod afterwards: there is no window where the file exists
-  # world-readable.
-  ( umask 077; print -r -- "$value" > "$file" )
+  # Keep traps local to this writer and remove only its own temporary file.
+  # SIGKILL and power loss cannot run cleanup; invalidation never deletes siblings.
+  if ! (
+    local tmp=''
+    trap '[[ -z "$tmp" ]] || rm -f -- "$tmp"' EXIT
+    trap 'exit 1' HUP INT TERM
+    mkdir -p "${file:h}" 2>/dev/null || exit 1
+    [[ ! -d "$file" ]] || exit 1
+    tmp=$(mktemp "${file}.XXXXXX") || exit 1
+    # mktemp already created the private file, so allow NO_CLOBBER callers.
+    print -r -- "$value" >| "$tmp" || exit 1
+    mv -f -- "$tmp" "$file" || exit 1
+  ); then
+    (( quiet )) || print -u2 "env_cache: $var set but cache write failed"
+  fi
+  return 0
 }
 
 env_cache_invalidate() {

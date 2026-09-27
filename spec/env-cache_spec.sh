@@ -67,9 +67,12 @@ Describe 'env-cache.zsh'
         unset MYTOK
         env_cache MYTOK --ttl 3600 --command 'print -r -- tok_refetched' --file "$CACHE"
         print -r -- "$MYTOK"
+        local -A st; zstat -H st "$CACHE"
+        print $(( st[mode] & 8#777 ))
       }
       When call loosen_then_read
-      The output should equal 'tok_refetched'
+      The line 1 of output should equal 'tok_refetched'
+      The line 2 of output should equal "$(( 8#600 ))"
     End
 
     It 'rejects a symlink standing in for the cache file'
@@ -82,6 +85,196 @@ Describe 'env-cache.zsh'
       }
       When call symlink_then_read
       The output should equal 'tok_real'
+      The contents of file "$TMPROOT/planted" should equal 'tok_planted'
+      The path "$CACHE" should not be symlink
+      The contents of file "$CACHE" should equal 'tok_real'
+    End
+
+    It 'replaces a stale hard-linked cache without changing its other name'
+      hardlink_then_read() {
+        print -r -- tok_old > "$TMPROOT/original"
+        chmod 600 "$TMPROOT/original"
+        ln "$TMPROOT/original" "$CACHE"
+        env_cache MYTOK --ttl 0 --command 'print -r -- tok_real' --file "$CACHE"
+      }
+      When call hardlink_then_read
+      The status should be success
+      The contents of file "$TMPROOT/original" should equal 'tok_old'
+      The contents of file "$CACHE" should equal 'tok_real'
+    End
+
+    It 'keeps the previous cache and removes temporary files if replacement fails'
+      failed_replace() {
+        print -r -- tok_old > "$CACHE"
+        chmod 600 "$CACHE"
+        mv() { return 1; }
+        env_cache MYTOK --ttl 0 --command 'print -r -- tok_real' --file "$CACHE"
+        local -a leftovers=("$CACHE".*(N))
+        print -r -- "${#leftovers}"
+      }
+      When call failed_replace
+      The status should be success
+      The output should equal 0
+      The stderr should include 'cache write failed'
+      The variable MYTOK should equal 'tok_real'
+      The contents of file "$CACHE" should equal 'tok_old'
+    End
+  End
+
+  Describe 'writer cleanup'
+    It 'refreshes with NO_CLOBBER while preserving the caller option'
+      noclobber_refresh() {
+        setopt LOCAL_OPTIONS
+        setopt NO_CLOBBER
+        env_cache MYTOK --ttl 0 --command 'print tok_old' --file "$CACHE"
+        unset MYTOK
+        env_cache MYTOK --ttl 0 --command 'print tok_new' --file "$CACHE"
+        [[ -o NO_CLOBBER ]] && print preserved
+      }
+      When call noclobber_refresh
+      The output should equal preserved
+      The contents of file "$CACHE" should equal tok_new
+    End
+
+    It 'keeps quiet on write failure when requested'
+      quiet_failure() {
+        mv() { return 1; }
+        env_cache MYTOK --ttl 0 --command 'print tok_new' --file "$CACHE" --quiet
+      }
+      When call quiet_failure
+      The status should be success
+      The stderr should equal ''
+      The variable MYTOK should equal tok_new
+    End
+
+    It "cleans this writer's temporary file on HUP"
+      interrupted_write() {
+        local signal=$1
+        print old > "$CACHE"
+        chmod 600 "$CACHE"
+        print sibling > "$CACHE.keep"
+        mv() {
+          zmodload zsh/system
+          kill -s "$signal" "$sysparams[pid]"
+          return 1
+        }
+        env_cache MYTOK --ttl 0 --command 'print tok_new' --file "$CACHE"
+        local -a leftovers=("$CACHE".*(N))
+        print ${#leftovers}
+      }
+      When call interrupted_write HUP
+      The status should be success
+      The output should equal 1
+      The stderr should include 'cache write failed'
+      The contents of file "$CACHE" should equal old
+      The contents of file "$CACHE.keep" should equal sibling
+    End
+
+    It "cleans this writer's temporary file on INT"
+      interrupted_write() {
+        local signal=$1
+        print old > "$CACHE"
+        chmod 600 "$CACHE"
+        print sibling > "$CACHE.keep"
+        mv() {
+          zmodload zsh/system
+          kill -s "$signal" "$sysparams[pid]"
+          return 1
+        }
+        env_cache MYTOK --ttl 0 --command 'print tok_new' --file "$CACHE"
+        local -a leftovers=("$CACHE".*(N))
+        print ${#leftovers}
+      }
+      When call interrupted_write INT
+      The status should be success
+      The output should equal 1
+      The stderr should include 'cache write failed'
+      The contents of file "$CACHE" should equal old
+      The contents of file "$CACHE.keep" should equal sibling
+    End
+
+    It "cleans this writer's temporary file on TERM"
+      interrupted_write() {
+        local signal=$1
+        print old > "$CACHE"
+        chmod 600 "$CACHE"
+        print sibling > "$CACHE.keep"
+        mv() {
+          zmodload zsh/system
+          kill -s "$signal" "$sysparams[pid]"
+          return 1
+        }
+        env_cache MYTOK --ttl 0 --command 'print tok_new' --file "$CACHE"
+        local -a leftovers=("$CACHE".*(N))
+        print ${#leftovers}
+      }
+      When call interrupted_write TERM
+      The status should be success
+      The output should equal 1
+      The stderr should include 'cache write failed'
+      The contents of file "$CACHE" should equal old
+      The contents of file "$CACHE.keep" should equal sibling
+    End
+
+    It 'warns when directory creation fails without losing the exported value'
+      failed_write() {
+        mkdir() { return 1; }
+        env_cache MYTOK --ttl 0 --command 'builtin print tok_new' --file "$CACHE"
+      }
+      When call failed_write
+      The status should be success
+      The variable MYTOK should equal tok_new
+      The stderr should include 'cache write failed'
+      The path "$CACHE" should not be exist
+    End
+
+    It 'warns when temporary creation fails without losing the exported value'
+      failed_write() {
+        mktemp() { return 1; }
+        env_cache MYTOK --ttl 0 --command 'builtin print tok_new' --file "$CACHE"
+      }
+      When call failed_write
+      The status should be success
+      The variable MYTOK should equal tok_new
+      The stderr should include 'cache write failed'
+      The path "$CACHE" should not be exist
+    End
+
+    It 'warns when writing fails without losing the exported value'
+      failed_write() {
+        print() { [[ "$*" == "-r -- tok_new" ]] && return 1; builtin print "$@"; }
+        env_cache MYTOK --ttl 0 --command 'builtin print tok_new' --file "$CACHE"
+      }
+      When call failed_write
+      The status should be success
+      The variable MYTOK should equal tok_new
+      The stderr should include 'cache write failed'
+      The path "$CACHE" should not be exist
+    End
+
+    It 'preserves caller signal traps'
+      caller_traps() {
+        setopt LOCAL_TRAPS
+        trap 'print caller' INT TERM HUP
+        local before=$(trap)
+        env_cache MYTOK --ttl 0 --command 'print tok_new' --file "$CACHE"
+        [[ "$(trap)" == "$before" ]] && print preserved
+      }
+      When call caller_traps
+      The status should be success
+      The output should equal preserved
+    End
+
+    It 'invalidates only the exact cache file'
+      invalidate_safely() {
+        print cache > "$CACHE"
+        print sibling > "$CACHE.keep"
+        env_cache_invalidate MYTOK --file "$CACHE"
+      }
+      When call invalidate_safely
+      The status should be success
+      The path "$CACHE" should not be exist
+      The contents of file "$CACHE.keep" should equal sibling
     End
   End
 
