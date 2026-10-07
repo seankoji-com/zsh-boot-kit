@@ -222,6 +222,7 @@ outdated_banner() {
   [[ "$count" == 0 ]] && return 0
 
   : ${hint:=see $cache}
+  hint=$(_out_format_hint "$hint")
 
   local text=$message
   [[ $count_mode == none ]] || text=$(printf -- "$message" "$count")
@@ -339,24 +340,121 @@ _out_run_upgrade_gum() {
 # Each item prints as it lands, so a long install shows a growing list instead
 # of a silent spinner. The protocol is emitted by the dotfiles `*-outdated-cache`
 # scripts when ZSH_BOOT_KIT_PROGRESS=1; any upgrade command can opt in.
+_out_format_hint() {
+  local raw=$1
+  [[ -z "$raw" || "$raw" == see\ * ]] && { print -r -- "$raw"; return 0; }
+
+  local -a items=("${(@s:, :)raw}")
+  local count=${#items}
+  (( count == 0 )) && return 0
+
+  local -a short_items=()
+  local it
+  for it in "${items[@]}"; do
+    if [[ "$it" != @* && "$it" == */* ]]; then
+      short_items+=("${it##*/}")
+    else
+      short_items+=("$it")
+    fi
+  done
+
+  if (( count <= 3 )); then
+    print -r -- "${(j:, :)short_items}"
+  else
+    print -r -- "${short_items[1]}, ${short_items[2]}, ${short_items[3]}, +$(( count - 3 )) more"
+  fi
+}
+
 _out_run_upgrade_progress() {
   local idx=$1 label=$2 log=$3
   local total=0 done=0 skipped=0 failed=0 line rc=1
   local rcfile="$log.rc"
+  local -a failed_items=()
   : >"$log"
   : >"$rcfile"
 
+  _render_bar() {
+    local item=$1
+    local current=$(( done + skipped + failed ))
+    local width=20
+    local t=$total
+    (( t <= 0 )) && t=1
+    (( current > t )) && current=$t
+    local filled=$(( current * width / t ))
+    local short_item="${item##*/}"
+    [[ ${#short_item} -gt 25 ]] && short_item="${short_item:0:22}…"
+
+    # Nerd Font progress bar glyphs:
+    # \uee00: empty left, \uee01: empty mid, \uee02: empty right
+    # \uee03: full left,  \uee04: full mid,  \uee05: full right
+    local bar=""
+    local f_color=$'\033[38;5;42m'
+    local e_color=$'\033[38;5;240m'
+    local reset=$'\033[0m'
+
+    if (( filled > 0 )); then
+      bar+="${f_color}"$'\uee03'
+    else
+      bar+="${e_color}"$'\uee00'
+    fi
+
+    local i
+    for (( i=1; i<width-1; i++ )); do
+      if (( i < filled )); then
+        bar+="${f_color}"$'\uee04'
+      else
+        bar+="${e_color}"$'\uee01'
+      fi
+    done
+
+    if (( filled >= width )); then
+      bar+="${f_color}"$'\uee05'
+    else
+      bar+="${e_color}"$'\uee02'
+    fi
+    bar+="${reset}"
+
+    if [[ -t 1 ]] || [[ "${ZSH_BOOT_KIT_UI:-auto}" == "gum" ]]; then
+      printf '\r\033[K  Updating %s %s %d/%d (%s)' \
+        "$label" "$bar" "$current" "$t" "$short_item"
+    else
+      printf '  Updating %s %s %d/%d (%s)\n' \
+        "$label" "$bar" "$current" "$t" "$short_item"
+    fi
+  }
+
   while IFS= read -r line; do
     case $line in
-      '@total '*) total=${line#@total } ;;
-      '@done '*)  done=$((done + 1));  gum style --foreground 42  "  ✔ ${line#@done }" ;;
-      '@skip '*)  skipped=$((skipped + 1)); gum style --foreground 214 "  ○ ${line#@skip } (skipped)" ;;
-      '@fail '*)  failed=$((failed + 1)); gum style --foreground 196 "  ✘ ${line#@fail }" ;;
+      '@total '*)
+        total=${line#@total }
+        _render_bar "starting"
+        ;;
+      '@done '*)
+        done=$((done + 1))
+        _render_bar "${line#@done }"
+        ;;
+      '@skip '*)
+        skipped=$((skipped + 1))
+        _render_bar "${line#@skip }"
+        ;;
+      '@fail '*)
+        failed=$((failed + 1))
+        failed_items+=("${line#@fail }")
+        _render_bar "${line#@fail }"
+        ;;
       *) print -r -- "$line" >>"$log" ;;
     esac
   done < <(_out_progress_stream "${_out_banners_upgrade[$idx]}" "$log" "$rcfile")
 
   [[ -s "$rcfile" ]] && rc=$(<"$rcfile")
+
+  if [[ -t 1 ]] || [[ "${ZSH_BOOT_KIT_UI:-auto}" == "gum" ]]; then
+    printf '\r\033[K'
+  fi
+
+  for item in "${failed_items[@]}"; do
+    gum style --foreground 196 "  ✘ ${item}"
+  done
 
   if (( failed > 0 || rc != 0 )); then
     local why="exit ${rc}"
