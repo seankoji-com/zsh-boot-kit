@@ -190,13 +190,10 @@ With [gum](https://charm.sh) on `PATH` — it is in the dotfiles
 `Brewfile.common` — the deferred prompt renders the banners in a rounded box,
 then asks one confirm. The default is No, so a bare `Enter` skips everything;
 choosing Update runs every collected upgrade and reports each result. An upgrade
-marked `--progress` prints one line per item as it lands, from the structured
-protocol its command emits under `ZSH_BOOT_KIT_PROGRESS=1`:
+marked `--progress` displays a live Nerd Font progress bar (`\uee00`–`\uee05`)
+while running and leaves a clean final summary line, avoiding terminal scrollback pollution:
 
 ```
-  ✔ htop
-  ✔ git
-  ○ node (skipped)
   ✔ Homebrew packages (2/3 updated, 1 skipped)
 ```
 

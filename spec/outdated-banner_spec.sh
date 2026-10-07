@@ -117,6 +117,24 @@ run_it() {
 When call run_it
 The output should equal '1 thing (run brew upgrade)'
 End
+
+It 'formats long hints compactly with +N more'
+run_it() {
+  print -l a >"$CACHE"
+  outdated_banner --cache "$CACHE" --message '%s thing' --hint 'a, b, c, d, e'
+}
+When call run_it
+The output should equal '1 thing (a, b, c, +2 more)'
+End
+
+It 'strips user/org prefixes in hints'
+run_it() {
+  print -l a >"$CACHE"
+  outdated_banner --cache "$CACHE" --message '%s thing' --hint 'user/repo-a, org/repo-b'
+}
+When call run_it
+The output should equal '1 thing (repo-a, repo-b)'
+End
 End
 
 Describe 'the upgrade prompt'
@@ -560,7 +578,7 @@ The output should include '✔ 1 brew thing'
 The contents of file "$FAKE_GUM_LOG" should include '1 brew thing'
 End
 
-It 'lists each item as it lands when the upgrade speaks --progress'
+It 'shows a progress bar when the upgrade speaks --progress'
 run_it() {
   print -l a >"$CACHE"
   outdated_banner --cache "$CACHE" --message '%s thing' --label 'Widgets' --progress --defer \
@@ -568,13 +586,13 @@ run_it() {
   outdated_banner_prompt
 }
 When call run_it
-The output should include '✔ alpha'
-The output should include '✔ beta'
+The output should include 'Updating Widgets'
+The output should include $'\uee03'
 The output should include '✔ Widgets (2/2 updated)'
 The output should not include '@total'
 End
 
-It 'reports skipped and failed items, and flags the system in the summary'
+It 'reports failed items, and flags the system in the summary'
 run_it() {
   print -l a >"$CACHE"
   outdated_banner --cache "$CACHE" --message '%s thing' --label 'Widgets' --progress --defer \
@@ -582,8 +600,7 @@ run_it() {
   outdated_banner_prompt
 }
 When call run_it
-The output should include '✔ alpha'
-The output should include '○ beta (skipped)'
+The output should include 'Updating Widgets'
 The output should include '✘ gamma'
 The output should include '✘ Widgets (1/3 updated, 1 failed)'
 End
