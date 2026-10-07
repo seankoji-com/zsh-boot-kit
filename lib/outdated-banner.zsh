@@ -337,9 +337,10 @@ _out_run_upgrade_gum() {
 #   @skip  NAME    one item was left alone (e.g. local changes)
 #   @fail  NAME    one item failed
 #
-# Each item prints as it lands, so a long install shows a growing list instead
-# of a silent spinner. The protocol is emitted by the dotfiles `*-outdated-cache`
-# scripts when ZSH_BOOT_KIT_PROGRESS=1; any upgrade command can opt in.
+# Renders a live Nerd Font progress bar (\uee00-\uee05) on stdout while
+# running and reports the final status upon completion, instead of dumping
+# every item as a separate line. The protocol is emitted by the dotfiles
+# `*-outdated-cache` scripts when ZSH_BOOT_KIT_PROGRESS=1.
 _out_format_hint() {
   local raw=$1
   [[ -z "$raw" || "$raw" == see\ * ]] && { print -r -- "$raw"; return 0; }
@@ -365,6 +366,55 @@ _out_format_hint() {
   fi
 }
 
+_out_render_progress_bar() {
+  local label=$1 done=$2 skipped=$3 failed=$4 total=$5 item=$6
+  local current=$(( done + skipped + failed ))
+  local width=20
+  (( total <= 0 )) && total=1
+  (( current > total )) && current=$total
+  local filled=$(( current * width / total ))
+  local short_item="${item##*/}"
+  [[ ${#short_item} -gt 25 ]] && short_item="${short_item:0:22}…"
+
+  # Nerd Font progress bar glyphs:
+  # \uee00: empty left, \uee01: empty mid, \uee02: empty right
+  # \uee03: full left,  \uee04: full mid,  \uee05: full right
+  local bar=""
+  local f_color=$'\033[38;5;42m'
+  local e_color=$'\033[38;5;240m'
+  local reset=$'\033[0m'
+
+  if (( filled > 0 )); then
+    bar+="${f_color}"$'\uee03'
+  else
+    bar+="${e_color}"$'\uee00'
+  fi
+
+  local i
+  for (( i=1; i<width-1; i++ )); do
+    if (( i < filled )); then
+      bar+="${f_color}"$'\uee04'
+    else
+      bar+="${e_color}"$'\uee01'
+    fi
+  done
+
+  if (( filled >= width )); then
+    bar+="${f_color}"$'\uee05'
+  else
+    bar+="${e_color}"$'\uee02'
+  fi
+  bar+="${reset}"
+
+  if [[ -t 1 ]] || [[ "${ZSH_BOOT_KIT_UI:-auto}" == "gum" ]]; then
+    printf '\r\033[K  Updating %s %s %d/%d (%s)' \
+      "$label" "$bar" "$current" "$total" "$short_item"
+  else
+    printf '  Updating %s %s %d/%d (%s)\n' \
+      "$label" "$bar" "$current" "$total" "$short_item"
+  fi
+}
+
 _out_run_upgrade_progress() {
   local idx=$1 label=$2 log=$3
   local total=0 done=0 skipped=0 failed=0 line rc=1
@@ -373,74 +423,24 @@ _out_run_upgrade_progress() {
   : >"$log"
   : >"$rcfile"
 
-  _render_bar() {
-    local item=$1
-    local current=$(( done + skipped + failed ))
-    local width=20
-    local t=$total
-    (( t <= 0 )) && t=1
-    (( current > t )) && current=$t
-    local filled=$(( current * width / t ))
-    local short_item="${item##*/}"
-    [[ ${#short_item} -gt 25 ]] && short_item="${short_item:0:22}…"
-
-    # Nerd Font progress bar glyphs:
-    # \uee00: empty left, \uee01: empty mid, \uee02: empty right
-    # \uee03: full left,  \uee04: full mid,  \uee05: full right
-    local bar=""
-    local f_color=$'\033[38;5;42m'
-    local e_color=$'\033[38;5;240m'
-    local reset=$'\033[0m'
-
-    if (( filled > 0 )); then
-      bar+="${f_color}"$'\uee03'
-    else
-      bar+="${e_color}"$'\uee00'
-    fi
-
-    local i
-    for (( i=1; i<width-1; i++ )); do
-      if (( i < filled )); then
-        bar+="${f_color}"$'\uee04'
-      else
-        bar+="${e_color}"$'\uee01'
-      fi
-    done
-
-    if (( filled >= width )); then
-      bar+="${f_color}"$'\uee05'
-    else
-      bar+="${e_color}"$'\uee02'
-    fi
-    bar+="${reset}"
-
-    if [[ -t 1 ]] || [[ "${ZSH_BOOT_KIT_UI:-auto}" == "gum" ]]; then
-      printf '\r\033[K  Updating %s %s %d/%d (%s)' \
-        "$label" "$bar" "$current" "$t" "$short_item"
-    else
-      printf '  Updating %s %s %d/%d (%s)\n' \
-        "$label" "$bar" "$current" "$t" "$short_item"
-    fi
-  }
-
   while IFS= read -r line; do
     case $line in
       '@total '*)
         total=${line#@total }
-        _render_bar "starting"
+        _out_render_progress_bar "$label" "$done" "$skipped" "$failed" "$total" "starting"
         ;;
       '@done '*)
         done=$((done + 1))
-        _render_bar "${line#@done }"
+        _out_render_progress_bar "$label" "$done" "$skipped" "$failed" "$total" "${line#@done }"
         ;;
       '@skip '*)
         skipped=$((skipped + 1))
-        _render_bar "${line#@skip }"
+        _out_render_progress_bar "$label" "$done" "$skipped" "$failed" "$total" "${line#@skip }"
         ;;
       '@fail '*)
         failed=$((failed + 1))
         failed_items+=("${line#@fail }")
-        _render_bar "${line#@fail }"
+        _out_render_progress_bar "$label" "$done" "$skipped" "$failed" "$total" "${line#@fail }"
         ;;
       *) print -r -- "$line" >>"$log" ;;
     esac

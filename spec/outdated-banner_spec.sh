@@ -587,6 +587,7 @@ run_it() {
 }
 When call run_it
 The output should include 'Updating Widgets'
+The output should include $'\uee03'
 The output should include '✔ Widgets (2/2 updated)'
 The output should not include '@total'
 End
