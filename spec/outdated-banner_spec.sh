@@ -634,6 +634,8 @@ run_it() {
 When call run_it
 The output should include '• alpha'
 The output should include '✔ Widgets (1/2 updated, 1 skipped)'
+# Nothing failed in this run, so nothing may ask for the failure colour.
+The contents of file "$FAKE_GUM_LOG" should not include '--foreground 196'
 End
 
 It 'reports failed items, and flags the system in the summary'
@@ -647,6 +649,22 @@ When call run_it
 The output should include 'Updating Widgets'
 The output should include '✘ gamma'
 The output should include '✘ Widgets (1/3 updated, 1 failed)'
+End
+
+# The example above passes even with an uncoloured item line: the fake gum prints
+# whatever text it is handed. Counting the invocations is what pins COLOUR — one
+# for the failed item, one for the summary (which is red regardless). Drop the
+# colour argument from _out_progress_item and this falls to 1.
+It 'colours the failed item line, not only the summary'
+run_it() {
+  print -l a >"$CACHE"
+  outdated_banner --cache "$CACHE" --message '%s thing' --label 'Widgets' --progress --defer \
+    --upgrade 'printf "@total 3\n@done alpha\n@fail gamma\n"; true'
+  outdated_banner_prompt >/dev/null
+  grep -c -- '--foreground 196' "$FAKE_GUM_LOG"
+}
+When call run_it
+The output should equal 2
 End
 
 It 'treats a non-zero exit with no item failures as a failure'
