@@ -196,14 +196,25 @@ the bar stays visible for the whole run and leaves a clean final summary line,
 avoiding terminal scrollback pollution:
 
 ```
-  ✔ aws-c-auth (3/56)
-  ✔ bat (4/56)
-  • zsh-syntax-highlighting (5/56)
-  Updating Homebrew packages ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂ 5/56
-  ✔ zsh plugins (1/2 updated, 1 skipped)
+  ✔ aws-c-auth (1/56)
+  ✔ bat (2/56)
+  ✔ ca-certificates (3/56)
+  Updating Homebrew packages ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂ 3/56
 ```
 
-The bar line carries only the label and the count; the item name never shares it.
+When the run ends, that bar line becomes the system's summary:
+
+```
+  ✔ aws-c-auth (1/56)
+  ✔ bat (2/56)
+  ✔ ca-certificates (3/56)
+  ✔ Homebrew packages (56/56 updated)
+```
+
+The `(n/total)` suffix belongs to the name the upgrade command emits, not to
+this module: the dotfiles `*-outdated-cache` scripts label each item `@done NAME
+(n/total)`, and the item line prints that name verbatim. The bar line itself
+carries only the label and the count. A failure keeps its red highlight.
 
 Anything else runs under a spinner with a one-line result. Item output is
 captured to a per-system log; a failure prints the log path instead of dumping

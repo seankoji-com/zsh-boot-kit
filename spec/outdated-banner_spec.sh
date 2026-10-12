@@ -609,6 +609,21 @@ The output should include 'Updating Widgets'
 The output should not include '(alpha)'
 End
 
+# The assertions above cannot catch a missing per-item redraw on their own: the
+# list still prints and the one bar drawn for @total still satisfies 'Updating
+# Widgets'. Counting the draws is what pins the bar staying on screen.
+It 'repaints the bar after every finished item, not only once'
+run_it() {
+  print -l a >"$CACHE"
+  outdated_banner --cache "$CACHE" --message '%s thing' --label 'Widgets' --progress --defer \
+    --upgrade 'printf "@total 2\n@done alpha\n@done beta\n"'
+  # One draw for @total, then one more after each of the two items.
+  outdated_banner_prompt | grep -o 'Updating Widgets' | wc -l | tr -d ' '
+}
+When call run_it
+The output should equal 3
+End
+
 It 'lists a skipped item without counting it as updated'
 run_it() {
   print -l a >"$CACHE"

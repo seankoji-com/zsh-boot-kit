@@ -375,13 +375,6 @@ _out_format_hint() {
   fi
 }
 
-# Whether the progress view can return the cursor to a line it already drew. A
-# terminal can; so can the forced gum backend, which the specs exercise without
-# one. Without either, every line is printed once and simply scrolls.
-_out_progress_tty() {
-  [[ -t 1 ]] || [[ "${ZSH_BOOT_KIT_UI:-auto}" == "gum" ]]
-}
-
 # The bar line, without cursor movement or a trailing newline: how far the run
 # has got, never which item it is on — items get lines of their own, so a long
 # name cannot push the bar around or be overwritten by it.
@@ -429,13 +422,15 @@ _out_progress_bar() {
 # Draw the bar, leaving the cursor parked on it so the next item overwrites that
 # line instead of adding one. _out_bar_drawn marks whether a bar is on screen
 # for this run: the first draw must not clear a line this run does not own.
+#
+# There is deliberately no non-terminal fallback: _out_run_upgrade_progress is
+# only reached from _out_prompt_gum, which needs gum, which is only selected on a
+# terminal (or by an explicit ZSH_BOOT_KIT_UI=gum, a setting for a terminal UI).
+# A branch that cannot be reached is worse than none — it reads as a guarantee
+# the code does not make.
 _out_progress_draw() {
   _out_progress_bar "$@"
-  if _out_progress_tty; then
-    _out_bar_drawn=1
-  else
-    printf '\n'
-  fi
+  _out_bar_drawn=1
 }
 
 # Retire the bar line, handing the cursor to something permanent: a finished
@@ -443,18 +438,21 @@ _out_progress_draw() {
 # below it. Clearing in place means the summary lands where the bar was, with no
 # blank line left behind.
 _out_progress_release() {
-  if (( _out_bar_drawn )) && _out_progress_tty; then
-    printf '\r\033[K'
-  fi
+  (( _out_bar_drawn )) && printf '\r\033[K'
   _out_bar_drawn=0
 }
 
 # One finished item on a permanent line of its own, leaving the cursor where the
-# bar is redrawn next.
+# bar is redrawn next. COLOUR, when given, is a gum foreground so a failure still
+# stands out in the list the way it did before this view existed.
 _out_progress_item() {
-  local glyph=$1 name=$2
+  local glyph=$1 name=$2 colour=$3
   _out_progress_release
-  printf '  %s %s\n' "$glyph" "$name"
+  if [[ -n "$colour" ]]; then
+    gum style --foreground "$colour" "  ${glyph} ${name}"
+  else
+    printf '  %s %s\n' "$glyph" "$name"
+  fi
 }
 
 _out_run_upgrade_progress() {
@@ -483,7 +481,7 @@ _out_run_upgrade_progress() {
         ;;
       '@fail '*)
         failed=$((failed + 1))
-        _out_progress_item '✘' "${line#@fail }"
+        _out_progress_item '✘' "${line#@fail }" 196
         _out_progress_draw "$label" "$done" "$skipped" "$failed" "$total"
         ;;
       *) print -r -- "$line" >>"$log" ;;
