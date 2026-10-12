@@ -173,7 +173,7 @@ depend on how slow `brew update` is.
 | `--count MODE` | `lines`, `content` (pre-computed number), or `none` |
 | `--upgrade CMD` | Offer to run this command when the banner fires |
 | `--label TEXT` | Short name for `CMD` in the progress view (e.g. `Homebrew packages`); defaults to the banner text |
-| `--progress` | `CMD` speaks the `@total`/`@done`/`@skip`/`@fail` protocol under `ZSH_BOOT_KIT_PROGRESS=1`, so the UI lists each item live instead of spinning |
+| `--progress` | `CMD` speaks the `@total`/`@done`/`@skip`/`@fail` protocol under `ZSH_BOOT_KIT_PROGRESS=1`, so the UI pins a progress bar under a live list of finished items instead of spinning |
 | `--hint TEXT` | Trailing parenthetical (default `see <cache>`) |
 | `--defer` | Collect the banner instead of prompting immediately |
 
@@ -190,12 +190,20 @@ With [gum](https://charm.sh) on `PATH` — it is in the dotfiles
 `Brewfile.common` — the deferred prompt renders the banners in a rounded box,
 then asks one confirm. The default is No, so a bare `Enter` skips everything;
 choosing Update runs every collected upgrade and reports each result. An upgrade
-marked `--progress` displays a live Nerd Font progress bar (`\uee00`–`\uee05`)
-while running and leaves a clean final summary line, avoiding terminal scrollback pollution:
+marked `--progress` holds a live Nerd Font progress bar (`\uee00`–`\uee05`) on
+the last line while every finished item is listed on its own line above it, so
+the bar stays visible for the whole run and leaves a clean final summary line,
+avoiding terminal scrollback pollution:
 
 ```
-  ✔ Homebrew packages (2/3 updated, 1 skipped)
+  ✔ aws-c-auth (3/56)
+  ✔ bat (4/56)
+  • zsh-syntax-highlighting (5/56)
+  Updating Homebrew packages ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂ 5/56
+  ✔ zsh plugins (1/2 updated, 1 skipped)
 ```
+
+The bar line carries only the label and the count; the item name never shares it.
 
 Anything else runs under a spinner with a one-line result. Item output is
 captured to a per-system log; a failure prints the log path instead of dumping

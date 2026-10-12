@@ -592,6 +592,35 @@ The output should include '✔ Widgets (2/2 updated)'
 The output should not include '@total'
 End
 
+# The bug this replaced: the bar and the item name took turns overwriting the
+# same line, so the bar vanished for the whole of each install.
+It 'keeps the bar on its own line and lists each finished item above it'
+run_it() {
+  print -l a >"$CACHE"
+  outdated_banner --cache "$CACHE" --message '%s thing' --label 'Widgets' --progress --defer \
+    --upgrade 'printf "@total 2\n@done alpha\n@done beta\n"'
+  outdated_banner_prompt
+}
+When call run_it
+The output should include '✔ alpha'
+The output should include '✔ beta'
+The output should include 'Updating Widgets'
+# In the old view the finished item was an '(alpha)' suffix on the bar line.
+The output should not include '(alpha)'
+End
+
+It 'lists a skipped item without counting it as updated'
+run_it() {
+  print -l a >"$CACHE"
+  outdated_banner --cache "$CACHE" --message '%s thing' --label 'Widgets' --progress --defer \
+    --upgrade 'printf "@total 2\n@skip alpha\n@done beta\n"'
+  outdated_banner_prompt
+}
+When call run_it
+The output should include '• alpha'
+The output should include '✔ Widgets (1/2 updated, 1 skipped)'
+End
+
 It 'reports failed items, and flags the system in the summary'
 run_it() {
   print -l a >"$CACHE"

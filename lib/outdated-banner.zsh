@@ -18,8 +18,9 @@
 #                      "Homebrew packages". Defaults to the banner line.
 #     --progress       CMD emits the structured progress protocol on stdout
 #                      (@total/@done/@skip/@fail — see _out_run_upgrade_progress)
-#                      under ZSH_BOOT_KIT_PROGRESS=1, so the UI can list each
-#                      item as it lands instead of spinning blindly
+#                      under ZSH_BOOT_KIT_PROGRESS=1, so the UI can hold a
+#                      progress bar on the last line and list each item on its
+#                      own line above it instead of spinning blindly
 #     --hint TEXT      trailing parenthetical (defaults to "see <cache>")
 #     --defer          collect the banner instead of prompting immediately;
 #                      show it and prompt once via outdated_banner_prompt
@@ -29,10 +30,11 @@
 #     collected upgrade commands. With gum(1) on PATH and a terminal, the
 #     banners render in a styled box and a single confirm asks whether to run
 #     every collected upgrade (default is No, so a bare Enter skips). Each then
-#     runs under its own spinner, or — for --progress entries — prints a line
-#     per item as it lands, followed by a summary. Without gum the original y/N
-#     prompt is used. Before either, it waits (when a background welcome
-#     process was registered via _out_bg_job_start — typically fastfetch) so
+#     runs under its own spinner, or — for --progress entries — keeps the
+#     progress bar pinned beneath a growing list of finished items, followed by
+#     a summary. Without gum the original y/N prompt is used. Before either, it
+#     waits (when a background welcome process was registered via
+#     _out_bg_job_start — typically fastfetch) so
 #     that process's output finishes drawing before the banners, and reaps it
 #     so zsh never prints a stray "[n] done" job line at the prompt.
 #
@@ -87,6 +89,11 @@ typeset -ga _out_banners_line _out_banners_upgrade _out_banners_label _out_banne
 typeset -gi _out_bg_job=0
 # Whether NOTIFY was on when that process was launched, so the reap restores it.
 typeset -gi _out_bg_notify=0
+
+# Whether the --progress view currently has a bar drawn on the terminal's last
+# line for the run in flight. Global, not local, because it is read and written
+# from several helpers; reset per run.
+typeset -gi _out_bar_drawn=0
 
 # Prefer gum for the deferred UI when it is installed and stdout is a terminal.
 # ZSH_BOOT_KIT_UI forces a backend: "gum" (falling back if absent) or "plain".
@@ -337,10 +344,12 @@ _out_run_upgrade_gum() {
 #   @skip  NAME    one item was left alone (e.g. local changes)
 #   @fail  NAME    one item failed
 #
-# Renders a live Nerd Font progress bar (\uee00-\uee05) on stdout while
-# running and reports the final status upon completion, instead of dumping
-# every item as a separate line. The protocol is emitted by the dotfiles
-# `*-outdated-cache` scripts when ZSH_BOOT_KIT_PROGRESS=1.
+# The view is a sticky footer: a Nerd Font progress bar (\uee00-\uee05) is
+# redrawn in place as the last line, and every finished item is printed as a
+# permanent line above it. A long upgrade therefore reads as a list growing down
+# the screen with the bar still visible underneath, rather than one line that
+# the item name and the bar take turns overwriting. The protocol is emitted by
+# the dotfiles `*-outdated-cache` scripts when ZSH_BOOT_KIT_PROGRESS=1.
 _out_format_hint() {
   local raw=$1
   [[ -z "$raw" || "$raw" == see\ * ]] && { print -r -- "$raw"; return 0; }
@@ -366,15 +375,23 @@ _out_format_hint() {
   fi
 }
 
-_out_render_progress_bar() {
-  local label=$1 done=$2 skipped=$3 failed=$4 total=$5 item=$6
+# Whether the progress view can return the cursor to a line it already drew. A
+# terminal can; so can the forced gum backend, which the specs exercise without
+# one. Without either, every line is printed once and simply scrolls.
+_out_progress_tty() {
+  [[ -t 1 ]] || [[ "${ZSH_BOOT_KIT_UI:-auto}" == "gum" ]]
+}
+
+# The bar line, without cursor movement or a trailing newline: how far the run
+# has got, never which item it is on — items get lines of their own, so a long
+# name cannot push the bar around or be overwritten by it.
+_out_progress_bar() {
+  local label=$1 done=$2 skipped=$3 failed=$4 total=$5
   local current=$(( done + skipped + failed ))
   local width=20
   (( total <= 0 )) && total=1
   (( current > total )) && current=$total
   local filled=$(( current * width / total ))
-  local short_item="${item##*/}"
-  [[ ${#short_item} -gt 25 ]] && short_item="${short_item:0:22}…"
 
   # Nerd Font progress bar glyphs:
   # \uee00: empty left, \uee01: empty mid, \uee02: empty right
@@ -406,41 +423,68 @@ _out_render_progress_bar() {
   fi
   bar+="${reset}"
 
-  if [[ -t 1 ]] || [[ "${ZSH_BOOT_KIT_UI:-auto}" == "gum" ]]; then
-    printf '\r\033[K  Updating %s %s %d/%d (%s)' \
-      "$label" "$bar" "$current" "$total" "$short_item"
+  printf '  Updating %s %s %d/%d' "$label" "$bar" "$current" "$total"
+}
+
+# Draw the bar, leaving the cursor parked on it so the next item overwrites that
+# line instead of adding one. _out_bar_drawn marks whether a bar is on screen
+# for this run: the first draw must not clear a line this run does not own.
+_out_progress_draw() {
+  _out_progress_bar "$@"
+  if _out_progress_tty; then
+    _out_bar_drawn=1
   else
-    printf '  Updating %s %s %d/%d (%s)\n' \
-      "$label" "$bar" "$current" "$total" "$short_item"
+    printf '\n'
   fi
+}
+
+# Retire the bar line, handing the cursor to something permanent: a finished
+# item, or the run's summary. The next _out_progress_draw paints a fresh bar
+# below it. Clearing in place means the summary lands where the bar was, with no
+# blank line left behind.
+_out_progress_release() {
+  if (( _out_bar_drawn )) && _out_progress_tty; then
+    printf '\r\033[K'
+  fi
+  _out_bar_drawn=0
+}
+
+# One finished item on a permanent line of its own, leaving the cursor where the
+# bar is redrawn next.
+_out_progress_item() {
+  local glyph=$1 name=$2
+  _out_progress_release
+  printf '  %s %s\n' "$glyph" "$name"
 }
 
 _out_run_upgrade_progress() {
   local idx=$1 label=$2 log=$3
   local total=0 done=0 skipped=0 failed=0 line rc=1
   local rcfile="$log.rc"
-  local -a failed_items=()
   : >"$log"
   : >"$rcfile"
+  _out_bar_drawn=0
 
   while IFS= read -r line; do
     case $line in
       '@total '*)
         total=${line#@total }
-        _out_render_progress_bar "$label" "$done" "$skipped" "$failed" "$total" "starting"
+        _out_progress_draw "$label" "$done" "$skipped" "$failed" "$total"
         ;;
       '@done '*)
         done=$((done + 1))
-        _out_render_progress_bar "$label" "$done" "$skipped" "$failed" "$total" "${line#@done }"
+        _out_progress_item '✔' "${line#@done }"
+        _out_progress_draw "$label" "$done" "$skipped" "$failed" "$total"
         ;;
       '@skip '*)
         skipped=$((skipped + 1))
-        _out_render_progress_bar "$label" "$done" "$skipped" "$failed" "$total" "${line#@skip }"
+        _out_progress_item '•' "${line#@skip }"
+        _out_progress_draw "$label" "$done" "$skipped" "$failed" "$total"
         ;;
       '@fail '*)
         failed=$((failed + 1))
-        failed_items+=("${line#@fail }")
-        _out_render_progress_bar "$label" "$done" "$skipped" "$failed" "$total" "${line#@fail }"
+        _out_progress_item '✘' "${line#@fail }"
+        _out_progress_draw "$label" "$done" "$skipped" "$failed" "$total"
         ;;
       *) print -r -- "$line" >>"$log" ;;
     esac
@@ -448,13 +492,8 @@ _out_run_upgrade_progress() {
 
   [[ -s "$rcfile" ]] && rc=$(<"$rcfile")
 
-  if [[ -t 1 ]] || [[ "${ZSH_BOOT_KIT_UI:-auto}" == "gum" ]]; then
-    printf '\r\033[K'
-  fi
-
-  for item in "${failed_items[@]}"; do
-    gum style --foreground 196 "  ✘ ${item}"
-  done
+  # Each failed item already printed as it happened, so only the summary is left.
+  _out_progress_release
 
   if (( failed > 0 || rc != 0 )); then
     local why="exit ${rc}"
