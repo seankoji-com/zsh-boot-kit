@@ -130,12 +130,15 @@ _out_bg_job_start() {
   return 0
 }
 
-# Background a command with MONITOR scoped off via local_options: zsh restores
-# the caller's setting on return, so there is no manual save/restore branch to
-# get wrong. `_out_bg_job` is global, not local, so it survives.
+# Background a command disowned (`&!`) so it never joins the job table. A
+# tracked job keeps a pending status that zsh prints at the next prompt as
+# "[n] + done ..." even after `wait` has reaped it, so a waitable-but-tracked
+# launch cannot be made silent. The PID is still recorded for the reap, which
+# polls it (see _out_wait_bg) rather than calling `wait`.
+# `_out_bg_job` is global, not local, so it survives.
 _out_launch_bg() {
   setopt local_options no_monitor
-  "$@" &
+  "$@" &!
   _out_bg_job=$!
 }
 
@@ -161,19 +164,30 @@ _out_register_bg_job() {
 # that hangs (a fastfetch probing a dead mount, a stuck --command block) cannot
 # wedge shell startup: a watchdog TERMs it after a few seconds.
 #
-# MONITOR is scoped off so reaping does not print the job-status line
-# ("[n] + done ...") zsh would otherwise emit. zsh's `wait` acts only on the
-# shell's own children, so a PID already reaped, or reused by an unrelated
-# process, is not a child and returns immediately (127) rather than blocking;
-# `|| true` keeps that a no-op under `set -e`.
+# The launch is disowned (_out_launch_bg), so `wait` cannot be used: on a PID
+# outside the job table it returns 127 at once and the prompt would race the
+# greeting. Poll with `kill -0` instead, which stays silent because nothing is in
+# the job table.
+#
+# `kill -0` only proves *some* process holds the PID, not that it is the greeting,
+# so a PID reused by an unrelated process keeps the poll alive rather than ending
+# it at once. The loop is therefore bounded by the same wall-clock deadline as the
+# watchdog, not by the process it cannot identify, so neither a reused PID nor a
+# TERM-ignoring one can extend the wait past it. The interval is coarse on
+# purpose: the loop only has to notice the greeting is gone before the prompt
+# prints, so a 20 ms poll would fork ~150 `sleep`s over the window for no gain.
 _out_wait_bg() {
   local pid=$1 watchdog
-  setopt local_options no_monitor
-  # Disowned so it never joins the job table; killed as soon as the real wait
+  local -F deadline
+  # Disowned so it never joins the job table; killed as soon as the poll
   # returns, so it cannot TERM a PID that has since been reused.
   ( sleep 3; kill -TERM "$pid" 2>/dev/null ) &!
   watchdog=$!
-  wait "$pid" 2>/dev/null || true
+  deadline=$(( EPOCHREALTIME + 3.0 ))
+  while kill -0 "$pid" 2>/dev/null; do
+    (( EPOCHREALTIME >= deadline )) && break
+    sleep 0.1
+  done
   kill "$watchdog" 2>/dev/null || true
 }
 
