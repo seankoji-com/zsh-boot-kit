@@ -353,14 +353,19 @@ The output should equal 'GREETING'
 The variable _out_bg_job should equal 0
 End
 
-It 'never prints a job-status line for a launched greeting'
+# Smoke check, not a regression test. shellspec runs with no job control, so a
+# tracked job is silent here regardless of how it was launched: the interactive
+# "[n] + done" notice this change removes cannot be reproduced in-suite, and
+# `jobs` reports nothing for either a tracked or a disowned launch under
+# shellspec. The fix's evidence is the pty repro on a live login shell (see the
+# PR); this example only pins that the launch and reap complete cleanly and
+# clear the recorded PID.
+It 'launches and reaps a greeting without error in-suite'
 run_it() {
   _out_launch_bg sh -c 'sleep 0.1'
   outdated_banner_prompt
 }
 When call run_it
-# A disowned launch leaves nothing in the job table, so zsh has no "[n] done"
-# notice to emit at the prompt.
 The output should equal ''
 The variable _out_bg_job should equal 0
 End

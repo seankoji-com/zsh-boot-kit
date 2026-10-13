@@ -166,17 +166,27 @@ _out_register_bg_job() {
 #
 # The launch is disowned (_out_launch_bg), so `wait` cannot be used: on a PID
 # outside the job table it returns 127 at once and the prompt would race the
-# greeting. Poll with `kill -0` instead, which tracks the process until zsh
-# reaps it, and stays silent because nothing is in the job table. A PID already
-# gone, or reused by an unrelated process, ends the loop at once.
+# greeting. Poll with `kill -0` instead, which stays silent because nothing is in
+# the job table.
+#
+# `kill -0` only proves *some* process holds the PID, not that it is the greeting,
+# so a PID reused by an unrelated process keeps the poll alive rather than ending
+# it at once. The loop is therefore bounded by the same wall-clock deadline as the
+# watchdog, not by the process it cannot identify, so neither a reused PID nor a
+# TERM-ignoring one can extend the wait past it. The interval is coarse on
+# purpose: the loop only has to notice the greeting is gone before the prompt
+# prints, so a 20 ms poll would fork ~150 `sleep`s over the window for no gain.
 _out_wait_bg() {
   local pid=$1 watchdog
+  local -F deadline
   # Disowned so it never joins the job table; killed as soon as the poll
   # returns, so it cannot TERM a PID that has since been reused.
   ( sleep 3; kill -TERM "$pid" 2>/dev/null ) &!
   watchdog=$!
+  deadline=$(( EPOCHREALTIME + 3.0 ))
   while kill -0 "$pid" 2>/dev/null; do
-    sleep 0.02
+    (( EPOCHREALTIME >= deadline )) && break
+    sleep 0.1
   done
   kill "$watchdog" 2>/dev/null || true
 }
