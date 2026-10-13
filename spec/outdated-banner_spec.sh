@@ -326,18 +326,15 @@ End
 
 It 'waits on the registered job before printing banners'
 Data 'n'
-Mock 'wait'
-print "WAITING $1"
-End
 run_it() {
   print -l a >"$CACHE"
-  _out_register_bg_job 99
+  _out_launch_bg sh -c 'sleep 0.3; echo GREETING'
   outdated_banner --cache "$CACHE" --message '%s thing' --defer --upgrade 'true'
   outdated_banner_prompt
 }
 When call run_it
-# The wait must happen BEFORE the banner appears, so the wait line is first.
-The line 1 of output should equal 'WAITING 99'
+# The greeting must finish drawing BEFORE the banner appears, so it is line 1.
+The line 1 of output should equal 'GREETING'
 The output should include '1 thing'
 # The PID is cleared after the wait so a later recycled PID can't block again.
 The variable _out_bg_job should equal 0
@@ -345,17 +342,26 @@ End
 
 It 'reaps a registered job even when nothing was collected'
 reset_accumulator
-Mock 'wait'
-print "WAITING $1"
-End
 run_it() {
-  _out_register_bg_job 99
+  _out_launch_bg sh -c 'sleep 0.3; echo GREETING'
   outdated_banner_prompt
 }
 When call run_it
-# The welcome job is reaped so zsh never prints "[n] done" at the prompt, but
-# with no banners there is nothing to show.
-The output should equal 'WAITING 99'
+# The greeting is reaped (not left to race the prompt), but with no banners
+# there is nothing else to show.
+The output should equal 'GREETING'
+The variable _out_bg_job should equal 0
+End
+
+It 'never prints a job-status line for a launched greeting'
+run_it() {
+  _out_launch_bg sh -c 'sleep 0.1'
+  outdated_banner_prompt
+}
+When call run_it
+# A disowned launch leaves nothing in the job table, so zsh has no "[n] done"
+# notice to emit at the prompt.
+The output should equal ''
 The variable _out_bg_job should equal 0
 End
 End
