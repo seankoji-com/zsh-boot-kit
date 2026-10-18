@@ -305,6 +305,24 @@ Describe 'env-cache.zsh'
   End
 
   Describe 'failure handling'
+    Describe 'missing option values'
+      Parameters
+        --ttl
+        --command
+        --file
+        --validate
+        --timeout
+      End
+
+      It "rejects a missing value for $1"
+        When call env_cache MYTOK --command 'print -r -- tok_unexpected' --file "$CACHE" "$1"
+        The status should equal 1
+        The stderr should include "$1 requires a value"
+        The variable MYTOK should be undefined
+        The path "$CACHE" should not be exist
+      End
+    End
+
     It 'warns and returns non-zero when the command produces nothing'
       When call env_cache MYTOK --ttl 3600 --command 'true' --file "$CACHE"
       The status should be failure

@@ -59,6 +59,14 @@ env_cache() {
   local ttl=0 cmd='' file='' validate='' timeout='' quiet=0
   while (( $# )); do
     case $1 in
+      --ttl|--command|--file|--validate|--timeout)
+        if (( $# < 2 )); then
+          print -u2 "env_cache: $1 requires a value"
+          return 1
+        fi
+        ;;
+    esac
+    case $1 in
       --ttl)      ttl=$2;      shift 2 ;;
       --command)  cmd=$2;      shift 2 ;;
       --file)     file=$2;     shift 2 ;;
