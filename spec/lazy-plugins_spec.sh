@@ -233,6 +233,25 @@ EOF
   End
 
   Describe 'surviving a lost registry'
+    It 'retains a trigger newly claimed by another plugin after partial registry loss'
+      run_it() {
+        make_fn_plugin first
+        make_plugin_defining second shared
+        lazy_plugins 'first:shared'
+        unset _lazy_plugin_of
+        typeset -gA _lazy_plugin_of
+        lazy_plugins 'second:shared'
+        lazy_plugins 'first:first'
+        first >/dev/null
+        print -r -- "${_lazy_plugin_of[shared]}"
+        shared x
+      }
+      When call run_it
+      The status should be success
+      The line 1 of output should equal second
+      The line 2 of output should equal 'second ran: x'
+    End
+
     # Tooling that serialises a shell's functions and replays them elsewhere
     # carries the stubs across but not the associative arrays. Claude Code's
     # shell snapshots do exactly this, and a stub that has to consult a registry

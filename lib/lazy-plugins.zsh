@@ -48,7 +48,15 @@ lazy_plugins() {
     local -a claimed
     # Keep earlier claims when configuration registers this plugin again.
     # Dispatch must remove those older stubs as well as this call's triggers.
-    claimed=(${=_lazy_triggers_of[$plugin]})
+    claimed=()
+    for trigger in ${=_lazy_triggers_of[$plugin]}; do
+      # A partially restored registry may have let another plugin claim it.
+      # Its new ownership takes precedence over this stale sibling entry.
+      if [[ -n "${_lazy_plugin_of[$trigger]}" && "${_lazy_plugin_of[$trigger]}" != "$plugin" ]]; then
+        continue
+      fi
+      claimed+=($trigger)
+    done
     for trigger in $triggers; do
       # Two plugins claiming the same trigger is a silent footgun: the second
       # registration overwrites the first, so one plugin simply never loads and
