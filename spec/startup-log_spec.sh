@@ -155,6 +155,84 @@ Describe 'startup-log.zsh'
   End
 
   Describe 'boot_kit_exclude'
+    # Each deterministic case runs in a subshell so replacing the clock cannot
+    # affect other examples. Exercise the public mark/exclude API and log output.
+    fixture_clock() {
+      zmodload -u zsh/datetime
+      typeset -gF EPOCHREALTIME=100
+      ZSH_BOOT_KIT_T0=100
+      boot_kit_timer_start
+    }
+    print_timing() {
+      _boot_kit_write_log
+      local line="$(<$ZSH_BOOT_KIT_LOG)"
+      print -r -- "${line[(w)3]} ${line#*ms  }"
+    }
+
+    It 'keeps ordinary phase durations without exclusions'
+      run_it() (
+        fixture_clock
+        EPOCHREALTIME=101; boot_kit_mark pre
+        EPOCHREALTIME=107; boot_kit_mark post
+        EPOCHREALTIME=108; print_timing
+      )
+      When call run_it
+      The output should equal '8000ms pre=1000 post=6000 prompt=1000'
+    End
+
+    It 'removes a wait after an earlier mark without making that phase negative'
+      run_it() (
+        fixture_clock
+        EPOCHREALTIME=101; boot_kit_mark pre
+        EPOCHREALTIME=106; boot_kit_exclude 101
+        EPOCHREALTIME=107; boot_kit_mark post
+        EPOCHREALTIME=108; print_timing
+      )
+      When call run_it
+      The output should equal '3000ms pre=1000 post=1000 prompt=1000'
+    End
+
+    It 'removes only the excluded portion of a phase marked inside a wait'
+      run_it() (
+        fixture_clock
+        EPOCHREALTIME=101; boot_kit_mark pre
+        EPOCHREALTIME=104; boot_kit_mark during
+        EPOCHREALTIME=106; boot_kit_exclude 102
+        EPOCHREALTIME=107; boot_kit_mark post
+        EPOCHREALTIME=108; print_timing
+      )
+      When call run_it
+      The output should equal '4000ms pre=1000 during=1000 post=1000 prompt=1000'
+    End
+
+    It 'handles separate waits before and after the first mark'
+      run_it() (
+        fixture_clock
+        EPOCHREALTIME=103; boot_kit_exclude 101
+        EPOCHREALTIME=104; boot_kit_mark pre
+        EPOCHREALTIME=108; boot_kit_exclude 105
+        EPOCHREALTIME=109; boot_kit_mark post
+        EPOCHREALTIME=110; print_timing
+      )
+      When call run_it
+      The output should equal '5000ms pre=2000 post=2000 prompt=1000'
+    End
+
+    It 'preserves the first prompt duration while excluding deferred work waits'
+      run_it() (
+        fixture_clock
+        ZSH_BOOT_KIT_LOG_AFTER=ready
+        EPOCHREALTIME=101; boot_kit_mark pre
+        EPOCHREALTIME=102; _boot_kit_first_prompt
+        EPOCHREALTIME=107; boot_kit_exclude 103
+        EPOCHREALTIME=108; boot_kit_mark ready
+        local line="$(<$ZSH_BOOT_KIT_LOG)"
+        print -r -- "${line[(w)3]} ${line#*ms  }"
+      )
+      When call run_it
+      The output should equal '4000ms pre=1000 prompt=1000 ready=2000'
+    End
+
     # Subtracting a blocking stretch means advancing T0, so the measured total
     # shrinks by however long the block lasted.
     It 'advances T0 by the elapsed time'

@@ -79,9 +79,20 @@ boot_kit_mark() {
 # Used by outdated-banner: waiting on a y/N prompt is user time, and running
 # an upgrade is network time. Neither is the shell's fault.
 boot_kit_exclude() {
-  local began=$1
+  local began=$1 now=$EPOCHREALTIME phase
   [[ -n "$began" ]] || return 1
-  ZSH_BOOT_KIT_T0=$(( ZSH_BOOT_KIT_T0 + (EPOCHREALTIME - began) ))
+  ZSH_BOOT_KIT_T0=$(( ZSH_BOOT_KIT_T0 + (now - began) ))
+  # Keep earlier boundaries on the same shifted clock as T0. A boundary
+  # inside the excluded interval collapses to its end, so only the portion
+  # before the wait contributes to that phase. Future marks use wall time.
+  for phase in "${(@k)_boot_kit_marks}"; do
+    if (( _boot_kit_marks[$phase] < began )); then
+      _boot_kit_marks[$phase]=$(( _boot_kit_marks[$phase] + now - began ))
+    elif (( _boot_kit_marks[$phase] < now )); then
+      _boot_kit_marks[$phase]=$now
+    fi
+  done
+  return 0
 }
 
 _boot_kit_write_log() {
