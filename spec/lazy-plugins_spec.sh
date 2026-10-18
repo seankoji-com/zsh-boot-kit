@@ -183,7 +183,75 @@ EOF
     End
   End
 
+  Describe 'registration across differing trigger sets'
+    Parameters
+      'demo:first'
+      'demo:first,second'
+    End
+    It 'cleans earlier alias stubs when a later registration loads the plugin'
+      run_it() {
+        mkdir -p "$ZSH_CUSTOM/plugins/demo"
+        cat > "$ZSH_CUSTOM/plugins/demo/demo.plugin.zsh" <<'EOF'
+(( LOAD_COUNT++ ))
+alias first='print first-ran'
+alias second='print second-ran'
+EOF
+        LOAD_COUNT=0
+        lazy_plugins "$1"
+        lazy_plugins 'demo:second'
+        second >/dev/null
+        (( $+functions[first] )) && print stale || print clean
+        # A variable invocation bypasses alias expansion, exposing an old stub
+        # even though a direct literal alias call would work after loading.
+        local old_trigger=first
+        "$old_trigger" >/dev/null 2>&1
+        local dispatch_status=$?
+        print -r -- "$LOAD_COUNT"
+        print -r -- "$dispatch_status"
+      }
+      When call run_it "$1"
+      The status should be success
+      The line 1 of output should equal clean
+      The line 2 of output should equal 1
+      # Once stubs are gone, variable invocation has normal alias semantics:
+      # aliases expand at parse time, so this alias-only name is not a command.
+      The line 3 of output should equal 127
+    End
+  End
+
+  Describe 'registration across overlapping trigger sets'
+    It 'keeps each claimed trigger once across overlapping registrations'
+      run_it() {
+        lazy_plugins 'demo:first'
+        lazy_plugins 'demo:first,second'
+        lazy_plugins 'demo:second'
+        print -r -- "${_lazy_triggers_of[demo]}"
+      }
+      When call run_it
+      The output should equal 'first second'
+    End
+  End
+
   Describe 'surviving a lost registry'
+    It 'retains a trigger newly claimed by another plugin after partial registry loss'
+      run_it() {
+        make_fn_plugin first
+        make_plugin_defining second shared
+        lazy_plugins 'first:shared'
+        unset _lazy_plugin_of
+        typeset -gA _lazy_plugin_of
+        lazy_plugins 'second:shared'
+        lazy_plugins 'first:first'
+        first >/dev/null
+        print -r -- "${_lazy_plugin_of[shared]}"
+        shared x
+      }
+      When call run_it
+      The status should be success
+      The line 1 of output should equal second
+      The line 2 of output should equal 'second ran: x'
+    End
+
     # Tooling that serialises a shell's functions and replays them elsewhere
     # carries the stubs across but not the associative arrays. Claude Code's
     # shell snapshots do exactly this, and a stub that has to consult a registry
