@@ -335,11 +335,69 @@ Describe 'env-cache.zsh'
 
     It 'kills a timed command that ignores TERM'
       Skip if 'GNU timeout is unavailable' no_timeout_tool
-      When call env_cache MYTOK --command "trap '' TERM; print partial; /bin/sleep 5" --file "$CACHE" --timeout 0.1
+      resistant() {
+        local start=$EPOCHREALTIME rc
+        env_cache MYTOK --command "trap '' TERM; print partial; /bin/sleep 5" --file "$CACHE" --timeout 0.1
+        rc=$?
+        (( EPOCHREALTIME - start < 3 )) && print bounded || print slow
+        return $rc
+      }
+      When call resistant
       The status should be failure
+      The output should equal bounded
       The stderr should include 'command failed or timed out'
       The variable MYTOK should be undefined
       The path "$CACHE" should not be exist
+    End
+
+    It 'bounds a background child that inherits stdout'
+      Skip if 'GNU timeout is unavailable' no_timeout_tool
+      background() {
+        local start=$EPOCHREALTIME rc
+        env_cache MYTOK --command '/bin/sleep 5 & print partial' --file "$CACHE" --timeout 0.1
+        rc=$?
+        (( EPOCHREALTIME - start < 3 )) && print bounded || print slow
+        return $rc
+      }
+      When call background
+      The status should be failure
+      The output should equal bounded
+      The stderr should include 'command failed or timed out'
+      The variable MYTOK should be undefined
+      The path "$CACHE" should not be exist
+    End
+
+    It 'bounds a detached child holding stdout'
+      Skip if 'GNU timeout is unavailable' no_timeout_tool
+      no_setsid() { (( ! $+commands[setsid] )); }
+      Skip if 'setsid is unavailable' no_setsid
+      detached() {
+        local start=$EPOCHREALTIME rc
+        env_cache MYTOK --command 'setsid /bin/sleep 2 & print partial' --file "$CACHE" --timeout 0.1
+        rc=$?
+        (( EPOCHREALTIME - start < 1.8 )) && print bounded || print slow
+        /bin/sleep 2
+        return $rc
+      }
+      When call detached
+      The status should be failure
+      The output should equal bounded
+      The stderr should include 'command failed or timed out'
+      The variable MYTOK should be undefined
+      The path "$CACHE" should not be exist
+    End
+
+    It 'does not load a user zshenv for a timed command'
+      Skip if 'GNU timeout is unavailable' no_timeout_tool
+      clean_zsh() {
+        print 'print startup_noise' > "$TMPROOT/.zshenv"
+        local -x ZDOTDIR="$TMPROOT"
+        env_cache MYTOK --command 'print value' --file "$CACHE" --timeout 2
+      }
+      When call clean_zsh
+      The status should be success
+      The variable MYTOK should equal value
+      The contents of file "$CACHE" should equal value
     End
 
     It 'rejects a zero timeout before running the command'

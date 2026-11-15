@@ -92,13 +92,16 @@ once a day instead of once a shell, keeping the value in
 | `--timeout SECS` | Give up on the command after this long |
 | `--quiet` | Do not warn on failure |
 
-`--timeout` accepts a positive number of seconds and requires GNU `timeout` or
+`--timeout` accepts positive integer or decimal seconds, such as `1` or
+`0.5`. Unit suffixes and forms such as `.5` are not accepted. It requires GNU `timeout` or
 `gtimeout` (provided by Homebrew coreutils on macOS). If neither is available,
-the command is not run. Timed commands run under zsh, and a nonzero exit or
-timeout discards their output. GNU timeout sends TERM, then KILL after one
-second; processes that escape its process group may survive. This is not a
-guarantee for commands that deliberately detach. Without `--timeout`, the
-command runs in the current zsh context and has no time limit.
+the command is not run. Timed commands run under `zsh -f`, which skips user
+startup files; commands that depend on those files must set up what they need.
+The system-wide zshenv may still run. A nonzero exit or timeout discards output.
+Background processes that keep stdout open count against the deadline. GNU
+timeout sends TERM, then KILL after one second; processes that escape its
+process group may survive. Without `--timeout`, the command runs in the
+caller's zsh context and has no time limit.
 
 `--validate` checks the returned value before caching. A value that fails
 validation is still exported, just not written.

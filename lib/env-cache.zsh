@@ -11,7 +11,8 @@
 #     --file PATH        cache location (default ~/.cache/zsh/<var lowercased>)
 #     --validate PATTERN glob alternation the value must match to be cached,
 #                        e.g. 'gho_*|ghp_*|github_pat_*'
-#     --timeout SECONDS  give up on the command after this long
+#     --timeout SECONDS  positive integer or decimal seconds; requires GNU
+#                        timeout/gtimeout, with a one-second KILL grace period
 #     --quiet            do not warn on failure
 #
 #   env_cache_invalidate VAR [--file PATH]
@@ -103,7 +104,17 @@ env_cache() {
       (( quiet )) || print -u2 "env_cache: --timeout requires GNU timeout or gtimeout"
       return 1
     fi
-    if ! value=$("$timeout_cmd" -k 1 "$timeout" zsh -c "$cmd" 2>/dev/null); then
+    # Capture inside the timed shell. Descendants inherit the inner pipe, not
+    # the caller's capture pipe, so even a detached child cannot hold up the
+    # caller after timeout. Keep the monitor alive until KILL if a child ignores
+    # TERM; restore the default TERM disposition for the command itself.
+    if ! value=$("$timeout_cmd" -k 1 "$timeout" zsh -fc '
+      trap "" TERM
+      output=$(trap - TERM; eval "$1")
+      result=$?
+      print -r -- "$output"
+      exit $result
+    ' env-cache "$cmd" 2>/dev/null); then
       (( quiet )) || print -u2 "env_cache: command failed or timed out — $var not set"
       return 1
     fi
