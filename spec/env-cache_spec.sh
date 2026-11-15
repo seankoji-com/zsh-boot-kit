@@ -298,9 +298,13 @@ Describe 'env-cache.zsh'
     It 'uses gtimeout and zsh even when SHELL names another shell'
       Skip if 'GNU timeout is unavailable' no_timeout_tool
       coreutils_timeout() {
-        local timeout_bin="${commands[gtimeout]:-${commands[timeout]}}" zsh_bin="$commands[zsh]"
+        local timeout_bin="${commands[timeout]:-${commands[gtimeout]}}" zsh_bin="$commands[zsh]"
         mkdir "$TMPROOT/bin"
-        ln -s "$timeout_bin" "$TMPROOT/bin/gtimeout"
+        # Some multicall implementations dispatch on argv[0], so a symlink
+        # named gtimeout to timeout does not necessarily invoke timeout.
+        local -x FIXTURE_TIMEOUT="$timeout_bin"
+        printf '%s\n' '#!/bin/sh' 'exec "$FIXTURE_TIMEOUT" "$@"' > "$TMPROOT/bin/gtimeout"
+        chmod +x "$TMPROOT/bin/gtimeout"
         ln -s "$zsh_bin" "$TMPROOT/bin/zsh"
         ln -s "$commands[mkdir]" "$TMPROOT/bin/mkdir"
         ln -s "$commands[mktemp]" "$TMPROOT/bin/mktemp"
@@ -336,7 +340,7 @@ Describe 'env-cache.zsh'
     It 'kills a timed command that ignores TERM'
       Skip if 'GNU timeout is unavailable' no_timeout_tool
       resistant() {
-        local start=$EPOCHREALTIME rc pid i
+        local start=$EPOCHREALTIME rc pid i state
         env_cache MYTOK --command "trap '' TERM; print partial; /bin/sh -c 'echo \$\$ > $TMPROOT/pid; exec /bin/sleep 5'" --file "$CACHE" --timeout 0.1
         rc=$?
         (( EPOCHREALTIME - start < 3 )) && print bounded || print slow
@@ -344,6 +348,10 @@ Describe 'env-cache.zsh'
         pid=$(<"$TMPROOT/pid")
         for i in {1..20}; do
           kill -0 "$pid" 2>/dev/null || { print stopped; return $rc; }
+          # An orphan may remain a zombie under a non-reaping PID 1. It has
+          # stopped executing even though kill -0 still finds its PID.
+          state=$(ps -o stat= -p "$pid" 2>/dev/null)
+          [[ "$state" == *Z* ]] && { print stopped; return $rc; }
           /bin/sleep 0.05
         done
         print alive
