@@ -35,6 +35,22 @@ _env_cache_path() {
   print -r -- "${HOME}/.cache/zsh/${1:l}"
 }
 
+# uutils 0.10.0 does not send SIGKILL to the process group with -k. Do
+# not run the command unless the utility identifies itself as GNU coreutils.
+_env_cache_gnu_timeout() {
+  local name candidate version
+  for name in gtimeout timeout; do
+    (( $+commands[$name] )) || continue
+    candidate=$commands[$name]
+    version=$("$candidate" --version 2>/dev/null) || continue
+    if [[ "$version" == 'timeout (GNU coreutils)'* || "$version" == 'gtimeout (GNU coreutils)'* ]]; then
+      print -r -- "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # Returns 0 if the file is safe to read and younger than the TTL.
 _env_cache_usable() {
   local file=$1 ttl=$2
@@ -96,11 +112,7 @@ env_cache() {
 
   local value timeout_cmd=''
   if (( timeout_requested )); then
-    if (( $+commands[gtimeout] )); then
-      timeout_cmd=$commands[gtimeout]
-    elif (( $+commands[timeout] )); then
-      timeout_cmd=$commands[timeout]
-    else
+    if ! timeout_cmd=$(_env_cache_gnu_timeout); then
       (( quiet )) || print -u2 "env_cache: --timeout requires GNU timeout or gtimeout"
       return 1
     fi

@@ -279,7 +279,19 @@ Describe 'env-cache.zsh'
   End
 
   Describe 'timeouts'
-    no_timeout_tool() { (( ! $+commands[timeout] && ! $+commands[gtimeout] )); }
+    no_timeout_tool() { ! _env_cache_gnu_timeout >/dev/null; }
+    child_state() {
+      local pid=$1 i state
+      for i in {1..20}; do
+        kill -0 "$pid" 2>/dev/null || { print stopped; return; }
+        # A non-reaping PID 1 can leave a dead child visible to kill -0.
+        state=$(ps -o stat= -p "$pid" 2>/dev/null)
+        [[ "$state" == *Z* ]] && { print stopped; return; }
+        /bin/sleep 0.05
+      done
+      print alive
+      /bin/sleep 5
+    }
 
     It 'refuses to run a cold-cache command when no timeout utility is available'
       no_timeout() {
@@ -295,10 +307,89 @@ Describe 'env-cache.zsh'
       The variable MYTOK should be undefined
     End
 
+    It 'refuses a non-GNU timeout before running the command'
+      non_gnu_timeout() {
+        mkdir "$TMPROOT/bin"
+        printf '%s\n' '#!/bin/sh' 'if [ "$1" = --version ]; then echo "timeout (uutils coreutils) 0.10.0"; else echo ran > "$MARKER"; fi' > "$TMPROOT/bin/timeout"
+        chmod +x "$TMPROOT/bin/timeout"
+        local -x MARKER="$TMPROOT/ran" PATH="$TMPROOT/bin"
+        env_cache MYTOK --command "print ran > $TMPROOT/ran" --file "$CACHE" --timeout 1
+      }
+      When call non_gnu_timeout
+      The status should be failure
+      The stderr should include 'requires GNU timeout or gtimeout'
+      The path "$TMPROOT/ran" should not be exist
+      The path "$CACHE" should not be exist
+      The variable MYTOK should be undefined
+    End
+
+    It 'refuses the installed uutils timeout before running the command'
+      no_uutils() {
+        (( $+commands[timeout] )) || return 0
+        local version=$("$commands[timeout]" --version 2>/dev/null)
+        [[ "$version" != 'timeout (uutils coreutils)'* ]]
+      }
+      Skip if 'uutils timeout is unavailable' no_uutils
+      real_uutils() {
+        local timeout_bin=$commands[timeout]
+        mkdir "$TMPROOT/bin"
+        ln -s "$timeout_bin" "$TMPROOT/bin/timeout"
+        local PATH="$TMPROOT/bin"
+        env_cache MYTOK --command "print ran > $TMPROOT/ran" --file "$CACHE" --timeout 1
+      }
+      When call real_uutils
+      The status should be failure
+      The stderr should include 'requires GNU timeout or gtimeout'
+      The path "$TMPROOT/ran" should not be exist
+      The path "$CACHE" should not be exist
+      The variable MYTOK should be undefined
+    End
+
+    It 'uses a valid warm cache even if timeout is non-GNU'
+      warm_without_gnu() {
+        print cached > "$CACHE"
+        chmod 600 "$CACHE"
+        mkdir "$TMPROOT/bin"
+        printf '%s\n' '#!/bin/sh' 'echo "timeout (uutils coreutils) 0.10.0"' > "$TMPROOT/bin/timeout"
+        chmod +x "$TMPROOT/bin/timeout"
+        local PATH="$TMPROOT/bin"
+        env_cache MYTOK --ttl 3600 --command 'print fresh' --file "$CACHE" --timeout 1
+      }
+      When call warm_without_gnu
+      The status should be success
+      The variable MYTOK should equal cached
+      The contents of file "$CACHE" should equal cached
+    End
+
+    It 'falls back to GNU timeout when gtimeout is non-GNU'
+      Skip if 'GNU timeout is unavailable' no_timeout_tool
+      fallback_timeout() {
+        local gnu_bin=$(_env_cache_gnu_timeout) zsh_bin=$commands[zsh]
+        mkdir "$TMPROOT/bin"
+        printf '%s\n' '#!/bin/sh' 'if [ "$1" = --version ]; then echo "gtimeout (uutils coreutils) 0.10.0"; else echo ran > "$MARKER"; fi' > "$TMPROOT/bin/gtimeout"
+        chmod +x "$TMPROOT/bin/gtimeout"
+        local -x FIXTURE_TIMEOUT="$gnu_bin" MARKER="$TMPROOT/ran"
+        printf '%s\n' '#!/bin/sh' 'exec "$FIXTURE_TIMEOUT" "$@"' > "$TMPROOT/bin/timeout"
+        chmod +x "$TMPROOT/bin/timeout"
+        ln -s "$zsh_bin" "$TMPROOT/bin/zsh"
+        ln -s "$commands[mkdir]" "$TMPROOT/bin/mkdir"
+        ln -s "$commands[mktemp]" "$TMPROOT/bin/mktemp"
+        ln -s "$commands[mv]" "$TMPROOT/bin/mv"
+        ln -s "$commands[rm]" "$TMPROOT/bin/rm"
+        local PATH="$TMPROOT/bin"
+        env_cache MYTOK --command 'print fallback' --file "$CACHE" --timeout 2
+      }
+      When call fallback_timeout
+      The status should be success
+      The variable MYTOK should equal fallback
+      The contents of file "$CACHE" should equal fallback
+      The path "$TMPROOT/ran" should not be exist
+    End
+
     It 'uses gtimeout and zsh even when SHELL names another shell'
       Skip if 'GNU timeout is unavailable' no_timeout_tool
       coreutils_timeout() {
-        local timeout_bin="${commands[timeout]:-${commands[gtimeout]}}" zsh_bin="$commands[zsh]"
+        local timeout_bin=$(_env_cache_gnu_timeout) zsh_bin="$commands[zsh]"
         mkdir "$TMPROOT/bin"
         # Some multicall implementations dispatch on argv[0], so a symlink
         # named gtimeout to timeout does not necessarily invoke timeout.
@@ -340,22 +431,13 @@ Describe 'env-cache.zsh'
     It 'kills a timed command that ignores TERM'
       Skip if 'GNU timeout is unavailable' no_timeout_tool
       resistant() {
-        local start=$EPOCHREALTIME rc pid i state
+        local start=$EPOCHREALTIME rc pid
         env_cache MYTOK --command "trap '' TERM; print partial; /bin/sh -c 'echo \$\$ > $TMPROOT/pid; exec /bin/sleep 5'" --file "$CACHE" --timeout 0.1
         rc=$?
         (( EPOCHREALTIME - start < 3 )) && print bounded || print slow
         [[ -s "$TMPROOT/pid" ]] || { print missing_pid; return $rc; }
         pid=$(<"$TMPROOT/pid")
-        for i in {1..20}; do
-          kill -0 "$pid" 2>/dev/null || { print stopped; return $rc; }
-          # An orphan may remain a zombie under a non-reaping PID 1. It has
-          # stopped executing even though kill -0 still finds its PID.
-          state=$(ps -o stat= -p "$pid" 2>/dev/null)
-          [[ "$state" == *Z* ]] && { print stopped; return $rc; }
-          /bin/sleep 0.05
-        done
-        print alive
-        /bin/sleep 5
+        child_state "$pid"
         return $rc
       }
       When call resistant
@@ -370,15 +452,18 @@ Describe 'env-cache.zsh'
     It 'bounds a background child that inherits stdout'
       Skip if 'GNU timeout is unavailable' no_timeout_tool
       background() {
-        local start=$EPOCHREALTIME rc
-        env_cache MYTOK --command '/bin/sleep 5 & print partial' --file "$CACHE" --timeout 0.1
+        local start=$EPOCHREALTIME rc pid
+        env_cache MYTOK --command "/bin/sh -c 'echo \$\$ > $TMPROOT/pid; exec /bin/sleep 5' & print partial" --file "$CACHE" --timeout 0.1
         rc=$?
         (( EPOCHREALTIME - start < 3 )) && print bounded || print slow
+        [[ -s "$TMPROOT/pid" ]] || { print missing_pid; return $rc; }
+        pid=$(<"$TMPROOT/pid")
+        child_state "$pid"
         return $rc
       }
       When call background
       The status should be failure
-      The output should equal bounded
+      The output should equal "$(printf 'bounded\nstopped')"
       The stderr should include 'command failed or timed out'
       The variable MYTOK should be undefined
       The path "$CACHE" should not be exist

@@ -94,7 +94,9 @@ once a day instead of once a shell, keeping the value in
 
 `--timeout` accepts positive integer or decimal seconds, such as `1` or
 `0.5`. Unit suffixes and forms such as `.5` are not accepted. It requires GNU `timeout` or
-`gtimeout` (provided by Homebrew coreutils on macOS). If neither is available,
+`gtimeout` (provided by Homebrew coreutils on macOS). The utility must identify
+itself as GNU coreutils; uutils `timeout` is rejected because its KILL escalation
+does not reliably reach the process group. If neither GNU utility is available,
 the command is not run. Timed commands run under `zsh -f`, which skips user
 startup files; commands that depend on those files must set up what they need.
 The system-wide zshenv may still run. A nonzero exit or timeout discards output.
