@@ -39,11 +39,11 @@ _env_cache_path() {
 # not run the command unless the utility identifies itself as GNU coreutils.
 _env_cache_gnu_timeout() {
   local name candidate version
-  for name in gtimeout timeout; do
+  for name in gtimeout gnutimeout timeout; do
     (( $+commands[$name] )) || continue
     candidate=$commands[$name]
     version=$("$candidate" --version 2>/dev/null) || continue
-    if [[ "$version" == 'timeout (GNU coreutils)'* || "$version" == 'gtimeout (GNU coreutils)'* ]]; then
+    if [[ "$version" == 'timeout (GNU coreutils)'* || "$version" == 'gtimeout (GNU coreutils)'* || "$version" == 'gnutimeout (GNU coreutils)'* ]]; then
       print -r -- "$candidate"
       return 0
     fi
@@ -113,7 +113,7 @@ env_cache() {
   local value timeout_cmd=''
   if (( timeout_requested )); then
     if ! timeout_cmd=$(_env_cache_gnu_timeout); then
-      (( quiet )) || print -u2 "env_cache: --timeout requires GNU timeout or gtimeout"
+      (( quiet )) || print -u2 "env_cache: --timeout requires GNU timeout or gtimeout (also supported: gnutimeout)"
       return 1
     fi
     # Capture inside the timed shell. Descendants inherit the inner pipe, not

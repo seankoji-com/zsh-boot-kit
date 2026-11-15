@@ -386,6 +386,28 @@ Describe 'env-cache.zsh'
       The path "$TMPROOT/ran" should not be exist
     End
 
+    It 'accepts GNU timeout installed as gnutimeout'
+      Skip if 'GNU timeout is unavailable' no_timeout_tool
+      gnutimeout_only() {
+        local gnu_bin=$(_env_cache_gnu_timeout) zsh_bin=$commands[zsh]
+        mkdir "$TMPROOT/bin"
+        local -x FIXTURE_TIMEOUT="$gnu_bin"
+        printf '%s\n' '#!/bin/sh' 'exec "$FIXTURE_TIMEOUT" "$@"' > "$TMPROOT/bin/gnutimeout"
+        chmod +x "$TMPROOT/bin/gnutimeout"
+        ln -s "$zsh_bin" "$TMPROOT/bin/zsh"
+        ln -s "$commands[mkdir]" "$TMPROOT/bin/mkdir"
+        ln -s "$commands[mktemp]" "$TMPROOT/bin/mktemp"
+        ln -s "$commands[mv]" "$TMPROOT/bin/mv"
+        ln -s "$commands[rm]" "$TMPROOT/bin/rm"
+        local PATH="$TMPROOT/bin"
+        env_cache MYTOK --command 'print value' --file "$CACHE" --timeout 2
+      }
+      When call gnutimeout_only
+      The status should be success
+      The variable MYTOK should equal value
+      The contents of file "$CACHE" should equal value
+    End
+
     It 'uses gtimeout and zsh even when SHELL names another shell'
       Skip if 'GNU timeout is unavailable' no_timeout_tool
       coreutils_timeout() {
