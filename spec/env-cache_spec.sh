@@ -337,14 +337,23 @@ Describe 'env-cache.zsh'
       Skip if 'GNU timeout is unavailable' no_timeout_tool
       resistant() {
         local start=$EPOCHREALTIME rc
-        env_cache MYTOK --command "trap '' TERM; print partial; /bin/sleep 5" --file "$CACHE" --timeout 0.1
+        env_cache MYTOK --command "trap '' TERM; print partial; /bin/sh -c 'echo \$\$ > $TMPROOT/pid; exec /bin/sleep 5'" --file "$CACHE" --timeout 0.1
         rc=$?
         (( EPOCHREALTIME - start < 3 )) && print bounded || print slow
+        if [[ -s "$TMPROOT/pid" ]] && kill -0 "$(<"$TMPROOT/pid")" 2>/dev/null; then
+          print alive
+          /bin/sleep 5
+        elif [[ -s "$TMPROOT/pid" ]]; then
+          print stopped
+        else
+          print missing_pid
+        fi
         return $rc
       }
       When call resistant
       The status should be failure
-      The output should equal bounded
+      The line 1 of output should equal bounded
+      The line 2 of output should equal stopped
       The stderr should include 'command failed or timed out'
       The variable MYTOK should be undefined
       The path "$CACHE" should not be exist
@@ -409,8 +418,7 @@ Describe 'env-cache.zsh'
   End
 
   Describe 'validation'
-    # A --timeout can truncate the command mid-output. Caching half a token for
-    # the full TTL is worse than not caching at all.
+    # Validation also protects against unexpected output from successful commands.
     It 'exports a value that fails validation but does not cache it'
       invalid() {
         env_cache MYTOK --ttl 3600 --command 'print -r -- garbage' \
