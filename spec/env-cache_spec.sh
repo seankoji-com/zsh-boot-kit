@@ -336,18 +336,18 @@ Describe 'env-cache.zsh'
     It 'kills a timed command that ignores TERM'
       Skip if 'GNU timeout is unavailable' no_timeout_tool
       resistant() {
-        local start=$EPOCHREALTIME rc
+        local start=$EPOCHREALTIME rc pid i
         env_cache MYTOK --command "trap '' TERM; print partial; /bin/sh -c 'echo \$\$ > $TMPROOT/pid; exec /bin/sleep 5'" --file "$CACHE" --timeout 0.1
         rc=$?
         (( EPOCHREALTIME - start < 3 )) && print bounded || print slow
-        if [[ -s "$TMPROOT/pid" ]] && kill -0 "$(<"$TMPROOT/pid")" 2>/dev/null; then
-          print alive
-          /bin/sleep 5
-        elif [[ -s "$TMPROOT/pid" ]]; then
-          print stopped
-        else
-          print missing_pid
-        fi
+        [[ -s "$TMPROOT/pid" ]] || { print missing_pid; return $rc; }
+        pid=$(<"$TMPROOT/pid")
+        for i in {1..20}; do
+          kill -0 "$pid" 2>/dev/null || { print stopped; return $rc; }
+          /bin/sleep 0.05
+        done
+        print alive
+        /bin/sleep 5
         return $rc
       }
       When call resistant
