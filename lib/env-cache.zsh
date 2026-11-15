@@ -11,7 +11,8 @@
 #     --file PATH        cache location (default ~/.cache/zsh/<var lowercased>)
 #     --validate PATTERN glob alternation the value must match to be cached,
 #                        e.g. 'gho_*|ghp_*|github_pat_*'
-#     --timeout SECONDS  give up on the command after this long
+#     --timeout SECONDS  positive integer or decimal seconds; requires GNU
+#                        timeout/gtimeout, with a one-second KILL grace period
 #     --quiet            do not warn on failure
 #
 #   env_cache_invalidate VAR [--file PATH]
@@ -32,6 +33,22 @@ zmodload -F zsh/stat b:zstat
 
 _env_cache_path() {
   print -r -- "${HOME}/.cache/zsh/${1:l}"
+}
+
+# uutils 0.10.0 does not send SIGKILL to the process group with -k. Do
+# not run the command unless the utility identifies itself as GNU coreutils.
+_env_cache_gnu_timeout() {
+  local name candidate version
+  for name in gtimeout gnutimeout timeout; do
+    (( $+commands[$name] )) || continue
+    candidate=$commands[$name]
+    version=$("$candidate" --version 2>/dev/null) || continue
+    if [[ "$version" == 'timeout (GNU coreutils)'* || "$version" == 'gtimeout (GNU coreutils)'* || "$version" == 'gnutimeout (GNU coreutils)'* ]]; then
+      print -r -- "$candidate"
+      return 0
+    fi
+  done
+  return 1
 }
 
 # Returns 0 if the file is safe to read and younger than the TTL.
@@ -56,7 +73,7 @@ env_cache() {
   local var=$1; shift
   [[ -n "$var" ]] || { print -u2 "env_cache: missing variable name"; return 1 }
 
-  local ttl=0 cmd='' file='' validate='' timeout='' quiet=0
+  local ttl=0 cmd='' file='' validate='' timeout='' quiet=0 timeout_requested=0
   while (( $# )); do
     case $1 in
       --ttl|--command|--file|--validate|--timeout)
@@ -71,12 +88,18 @@ env_cache() {
       --command)  cmd=$2;      shift 2 ;;
       --file)     file=$2;     shift 2 ;;
       --validate) validate=$2; shift 2 ;;
-      --timeout)  timeout=$2;  shift 2 ;;
+      --timeout)  timeout=$2; timeout_requested=1; shift 2 ;;
       --quiet)    quiet=1;     shift   ;;
       *) print -u2 "env_cache: unknown option '$1'"; return 1 ;;
     esac
   done
   [[ -n "$cmd" ]] || { print -u2 "env_cache: --command is required"; return 1 }
+  if (( timeout_requested )); then
+    if [[ ! "$timeout" =~ '^[0-9]+([.][0-9]+)?$' || "$timeout" != *[1-9]* ]]; then
+      print -u2 "env_cache: --timeout requires a positive number of seconds"
+      return 1
+    fi
+  fi
   : ${file:=$(_env_cache_path $var)}
 
   # Already set in the environment (exported by a parent, or by the user).
@@ -87,9 +110,26 @@ env_cache() {
     return 0
   fi
 
-  local value
-  if [[ -n "$timeout" ]] && (( $+commands[timeout] )); then
-    value=$(timeout "$timeout" ${SHELL:-zsh} -c "$cmd" 2>/dev/null)
+  local value timeout_cmd=''
+  if (( timeout_requested )); then
+    if ! timeout_cmd=$(_env_cache_gnu_timeout); then
+      (( quiet )) || print -u2 "env_cache: --timeout requires GNU timeout or gtimeout (also supported: gnutimeout)"
+      return 1
+    fi
+    # Capture inside the timed shell. Descendants inherit the inner pipe, not
+    # the caller's capture pipe, so even a detached child cannot hold up the
+    # caller after timeout. Keep the monitor alive until KILL if a child ignores
+    # TERM; restore the default TERM disposition for the command itself.
+    if ! value=$("$timeout_cmd" -k 1 "$timeout" zsh -fc '
+      trap "" TERM
+      output=$(trap - TERM; eval "$1")
+      result=$?
+      print -r -- "$output"
+      exit $result
+    ' env-cache "$cmd" 2>/dev/null); then
+      (( quiet )) || print -u2 "env_cache: command failed or timed out — $var not set"
+      return 1
+    fi
   else
     value=$(eval "$cmd" 2>/dev/null)
   fi
@@ -101,9 +141,7 @@ env_cache() {
 
   typeset -gx $var="$value"
 
-  # Only cache a value that looks right. A timeout can truncate mid-output,
-  # and caching a half-written token for the full TTL is worse than not
-  # caching at all.
+  # Only cache a value that looks right.
   if [[ -n "$validate" ]] && [[ "$value" != (${~validate}) ]]; then
     (( quiet )) || print -u2 "env_cache: $var failed validation — set but not cached"
     return 0
