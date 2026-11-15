@@ -278,6 +278,78 @@ Describe 'env-cache.zsh'
     End
   End
 
+  Describe 'timeouts'
+    no_timeout_tool() { (( ! $+commands[timeout] && ! $+commands[gtimeout] )); }
+
+    It 'refuses to run a cold-cache command when no timeout utility is available'
+      no_timeout() {
+        mkdir "$TMPROOT/empty"
+        local PATH="$TMPROOT/empty"
+        env_cache MYTOK --command "print ran > $TMPROOT/ran" --file "$CACHE" --timeout 1
+      }
+      When call no_timeout
+      The status should be failure
+      The stderr should include 'requires GNU timeout or gtimeout'
+      The path "$TMPROOT/ran" should not be exist
+      The path "$CACHE" should not be exist
+      The variable MYTOK should be undefined
+    End
+
+    It 'uses gtimeout and zsh even when SHELL names another shell'
+      Skip if 'GNU timeout is unavailable' no_timeout_tool
+      coreutils_timeout() {
+        local timeout_bin="${commands[gtimeout]:-${commands[timeout]}}" zsh_bin="$commands[zsh]"
+        mkdir "$TMPROOT/bin"
+        ln -s "$timeout_bin" "$TMPROOT/bin/gtimeout"
+        ln -s "$zsh_bin" "$TMPROOT/bin/zsh"
+        ln -s "$commands[mkdir]" "$TMPROOT/bin/mkdir"
+        ln -s "$commands[mktemp]" "$TMPROOT/bin/mktemp"
+        ln -s "$commands[mv]" "$TMPROOT/bin/mv"
+        ln -s "$commands[rm]" "$TMPROOT/bin/rm"
+        local PATH="$TMPROOT/bin" SHELL=/bin/false
+        env_cache MYTOK --command 'print zsh_value' --file "$CACHE" --timeout 2
+      }
+      When call coreutils_timeout
+      The status should be success
+      The variable MYTOK should equal zsh_value
+      The contents of file "$CACHE" should equal zsh_value
+    End
+
+    It 'discards output from a command that exits unsuccessfully'
+      Skip if 'GNU timeout is unavailable' no_timeout_tool
+      When call env_cache MYTOK --command 'print partial; exit 7' --file "$CACHE" --timeout 2
+      The status should be failure
+      The stderr should include 'command failed or timed out'
+      The variable MYTOK should be undefined
+      The path "$CACHE" should not be exist
+    End
+
+    It 'discards partial output after a timeout'
+      Skip if 'GNU timeout is unavailable' no_timeout_tool
+      When call env_cache MYTOK --command 'print partial; /bin/sleep 3' --file "$CACHE" --timeout 0.1
+      The status should be failure
+      The stderr should include 'command failed or timed out'
+      The variable MYTOK should be undefined
+      The path "$CACHE" should not be exist
+    End
+
+    It 'kills a timed command that ignores TERM'
+      Skip if 'GNU timeout is unavailable' no_timeout_tool
+      When call env_cache MYTOK --command "trap '' TERM; print partial; /bin/sleep 5" --file "$CACHE" --timeout 0.1
+      The status should be failure
+      The stderr should include 'command failed or timed out'
+      The variable MYTOK should be undefined
+      The path "$CACHE" should not be exist
+    End
+
+    It 'rejects a zero timeout before running the command'
+      When call env_cache MYTOK --command "print ran > $TMPROOT/ran" --file "$CACHE" --timeout 0
+      The status should be failure
+      The stderr should include 'requires a positive number'
+      The path "$TMPROOT/ran" should not be exist
+    End
+  End
+
   Describe 'validation'
     # A --timeout can truncate the command mid-output. Caching half a token for
     # the full TTL is worse than not caching at all.

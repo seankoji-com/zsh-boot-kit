@@ -92,10 +92,16 @@ once a day instead of once a shell, keeping the value in
 | `--timeout SECS` | Give up on the command after this long |
 | `--quiet` | Do not warn on failure |
 
-`--validate` guards against caching a truncated value. A `--timeout` can cut
-the command off mid-output, and storing half a token for a full day is worse
-than not caching. A value that fails validation is still exported, just not
-written.
+`--timeout` accepts a positive number of seconds and requires GNU `timeout` or
+`gtimeout` (provided by Homebrew coreutils on macOS). If neither is available,
+the command is not run. Timed commands run under zsh, and a nonzero exit or
+timeout discards their output. GNU timeout sends TERM, then KILL after one
+second; processes that escape its process group may survive. This is not a
+guarantee for commands that deliberately detach. Without `--timeout`, the
+command runs in the current zsh context and has no time limit.
+
+`--validate` checks the returned value before caching. A value that fails
+validation is still exported, just not written.
 
 Before trusting a cache file, `env_cache` checks that it is a regular file, that
 you own it, and that it is mode 0600. Anything else is ignored and refetched.
